@@ -157,6 +157,18 @@ class provider implements
                     (object)['alerts' => $data]
                 );
             }
+
+            // Export completion email preference.
+            $prefkey = 'block_enrolmenttimer_completion_' . $context->instanceid;
+            $prefvalue = get_user_preferences($prefkey, null, $userid);
+            if ($prefvalue !== null) {
+                writer::with_context($context)->export_user_preference(
+                    'block_enrolmenttimer',
+                    $prefkey,
+                    \core_privacy\local\request\transform::datetime($prefvalue),
+                    get_string('privacy:metadata:completion_preference', 'block_enrolmenttimer')
+                );
+            }
         }
     }
 
@@ -172,16 +184,30 @@ class provider implements
             return;
         }
 
+        // Find all affected users to delete their preferences.
+        $sql = "SELECT DISTINCT ue.userid
+                  FROM {block_enrolmenttimer} bet
+                  JOIN {user_enrolments} ue ON ue.id = bet.enrolid
+                  JOIN {enrol} e ON e.id = ue.enrolid
+                 WHERE e.courseid = :courseid";
+        $userids = $DB->get_fieldset_sql($sql, ['courseid' => $context->instanceid]);
+
+        // Delete alert records.
         $sql = "SELECT bet.id
                   FROM {block_enrolmenttimer} bet
                   JOIN {user_enrolments} ue ON ue.id = bet.enrolid
                   JOIN {enrol} e ON e.id = ue.enrolid
                  WHERE e.courseid = :courseid";
-
         $recordids = $DB->get_fieldset_sql($sql, ['courseid' => $context->instanceid]);
         if (!empty($recordids)) {
             list($insql, $params) = $DB->get_in_or_equal($recordids, SQL_PARAMS_NAMED);
             $DB->delete_records_select('block_enrolmenttimer', "id $insql", $params);
+        }
+
+        // Delete completion email preferences.
+        $prefkey = 'block_enrolmenttimer_completion_' . $context->instanceid;
+        foreach ($userids as $uid) {
+            unset_user_preference($prefkey, $uid);
         }
     }
 
@@ -215,6 +241,10 @@ class provider implements
                 list($insql, $params) = $DB->get_in_or_equal($recordids, SQL_PARAMS_NAMED);
                 $DB->delete_records_select('block_enrolmenttimer', "id $insql", $params);
             }
+
+            // Delete completion email preference.
+            $prefkey = 'block_enrolmenttimer_completion_' . $context->instanceid;
+            unset_user_preference($prefkey, $userid);
         }
     }
 
@@ -250,6 +280,12 @@ class provider implements
         if (!empty($recordids)) {
             list($insql, $inparams) = $DB->get_in_or_equal($recordids, SQL_PARAMS_NAMED);
             $DB->delete_records_select('block_enrolmenttimer', "id $insql", $inparams);
+        }
+
+        // Delete completion email preferences.
+        $prefkey = 'block_enrolmenttimer_completion_' . $context->instanceid;
+        foreach ($userids as $uid) {
+            unset_user_preference($prefkey, $uid);
         }
     }
 }

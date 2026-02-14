@@ -61,12 +61,29 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
             return true;
         }
 
+        // Warn early if email templates are not configured.
+        if ($alertenabled) {
+            $subject = get_config('enrolmenttimer', 'enrolmentemailsubject');
+            $body = get_config('enrolmenttimer', 'timeleftmessage');
+            if (empty($subject) || empty($body)) {
+                mtrace('WARNING: Alert emails enabled but subject or body is empty. Configure in Site Admin > Plugins > Blocks > Enrolment Timer.');
+            }
+        }
+        if ($completionenabled) {
+            $subject = get_config('enrolmenttimer', 'completionemailsubject');
+            $body = get_config('enrolmenttimer', 'completionsmessage');
+            if (empty($subject) || empty($body)) {
+                mtrace('WARNING: Completion emails enabled but subject or body is empty. Configure in Site Admin > Plugins > Blocks > Enrolment Timer.');
+            }
+        }
+
         // Get all instances of the block.
         $instances = $DB->get_records('block_instances', ['blockname' => 'enrolmenttimer']);
 
         foreach ($instances as $instance) {
             $block = block_instance('enrolmenttimer', $instance);
             if (!$block || empty($block->instance->parentcontextid)) {
+                mtrace("WARNING: skipping block instance {$instance->id} - could not instantiate");
                 continue;
             }
 
@@ -77,7 +94,7 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
 
             $courseid = $blockcontext->instanceid;
             $course = $DB->get_record('course', ['id' => $courseid]);
-            if (!$course) {
+            if (!$course || !$course->visible) {
                 continue;
             }
 
@@ -86,15 +103,18 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
                 continue;
             }
 
-            // Get enrolled users (not hardcoded role ID).
             $users = get_enrolled_users($coursecontext, '', 0, 'u.*');
 
             foreach ($users as $user) {
-                if ($alertenabled) {
-                    $this->process_expiry_alert($user, $course);
-                }
-                if ($completionenabled) {
-                    $this->process_completion_email($user, $course);
+                try {
+                    if ($alertenabled) {
+                        $this->process_expiry_alert($user, $course);
+                    }
+                    if ($completionenabled) {
+                        $this->process_completion_email($user, $course);
+                    }
+                } catch (\Exception $e) {
+                    mtrace("ERROR: processing user {$user->id} in course {$course->id}: " . $e->getMessage());
                 }
             }
         }
@@ -118,43 +138,47 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
         global $DB;
 
         $records = block_enrolmenttimer_get_enrolment_records($user->id, $course->id);
-        if (!isset($records[$user->id])) {
+        if (empty($records)) {
             return;
         }
 
-        $record = $records[$user->id];
-        if (!is_object($record)) {
-            return;
+        $daystoalert = get_config('enrolmenttimer', 'daystoalertenrolmentend');
+        if ($daystoalert === false || !is_numeric($daystoalert)) {
+            $daystoalert = 10;
         }
+        $daystoalert = (int)$daystoalert;
 
-        // Already tracked.
-        if ($DB->record_exists('block_enrolmenttimer', ['enrolid' => $record->id])) {
-            return;
-        }
+        foreach ($records as $record) {
+            // Already tracked.
+            if ($DB->record_exists('block_enrolmenttimer', ['enrolid' => $record->id])) {
+                continue;
+            }
 
-        $daystoalert = (int)get_config('enrolmenttimer', 'daystoalertenrolmentend');
+            $endtime = 0;
+            if ($record->timeend != 0) {
+                $endtime = (int)$record->timeend;
+            } else {
+                // Check enrol method end date (any enrolment type).
+                $enrol = $DB->get_record('enrol', ['id' => $record->enrolid], 'enrolenddate');
+                if ($enrol && !empty($enrol->enrolenddate) && (int)$enrol->enrolenddate > 0) {
+                    $endtime = (int)$enrol->enrolenddate;
+                }
+            }
 
-        if ($record->timeend != 0) {
-            // Direct enrolment end date.
-            $enrolmentend = (int)$record->timeend;
-            $alerttime = $enrolmentend - ($daystoalert * 86400);
+            if ($endtime <= 0) {
+                continue;
+            }
 
-            $object = new \stdClass();
-            $object->enrolid = $record->id;
-            $object->alerttime = $alerttime;
-            $object->sent = 0;
-            $DB->insert_record('block_enrolmenttimer', $object);
-        } else {
-            // Check enrol method end date.
-            $enrol = $DB->get_record('enrol', ['id' => $record->enrolid], 'enrolenddate');
-            if ($enrol && !empty($enrol->enrolenddate) && (int)$enrol->enrolenddate > 0) {
-                $alerttime = (int)$enrol->enrolenddate - ($daystoalert * 86400);
+            $alerttime = $endtime - ($daystoalert * 86400);
 
+            try {
                 $object = new \stdClass();
                 $object->enrolid = $record->id;
                 $object->alerttime = $alerttime;
                 $object->sent = 0;
                 $DB->insert_record('block_enrolmenttimer', $object);
+            } catch (\dml_exception $e) {
+                mtrace("WARNING: could not insert alert for enrolment {$record->id}: " . $e->getMessage());
             }
         }
     }
@@ -168,7 +192,6 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
     private function process_completion_email($user, $course) {
         global $DB;
 
-        // Check if we already sent this user a completion email for this course.
         $prefkey = 'block_enrolmenttimer_completion_' . $course->id;
         $already = get_user_preferences($prefkey, null, $user->id);
         if ($already) {
@@ -195,7 +218,6 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
             return;
         }
 
-        // Send the completion email.
         $from = \core_user::get_support_user();
         $subject = get_config('enrolmenttimer', 'completionemailsubject');
         $body = get_config('enrolmenttimer', 'completionsmessage');
@@ -212,7 +234,9 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
 
         if ($result) {
             set_user_preference($prefkey, time(), $user->id);
-            mtrace("- completion email sent to {$user->id} for course {$course->id}");
+            mtrace("- completion email sent to user {$user->id} for course {$course->id}");
+        } else {
+            mtrace("ERROR: failed to send completion email to user {$user->id} (email: {$user->email}) for course {$course->id}");
         }
     }
 
@@ -226,10 +250,23 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
         $sql = "SELECT * FROM {block_enrolmenttimer} WHERE sent = 0 AND alerttime < :time";
         $emailstosend = $DB->get_records_sql($sql, ['time' => $time]);
 
+        if (empty($emailstosend)) {
+            mtrace('- no pending alerts to send');
+            return;
+        }
+
+        $subject = get_config('enrolmenttimer', 'enrolmentemailsubject');
+        $bodytemplate = get_config('enrolmenttimer', 'timeleftmessage');
+
+        if (empty($subject) || empty($bodytemplate)) {
+            mtrace('ERROR: alert emails enabled but subject or body not configured. Skipping all pending alerts.');
+            return;
+        }
+
         foreach ($emailstosend as $alert) {
             $enrolinstance = $DB->get_record('user_enrolments', ['id' => $alert->enrolid]);
             if (!$enrolinstance) {
-                // Orphaned record, mark as sent.
+                mtrace("WARNING: orphaned alert record {$alert->id} (enrolid {$alert->enrolid} not found), marking handled");
                 $alert->sent = 1;
                 $DB->update_record('block_enrolmenttimer', $alert);
                 continue;
@@ -238,6 +275,7 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
             $user = $DB->get_record('user', ['id' => $enrolinstance->userid]);
             $enrol = $DB->get_record('enrol', ['id' => $enrolinstance->enrolid]);
             if (!$user || !$enrol) {
+                mtrace("WARNING: missing user or enrol for alert {$alert->id}, marking handled");
                 $alert->sent = 1;
                 $DB->update_record('block_enrolmenttimer', $alert);
                 continue;
@@ -250,16 +288,8 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
                 continue;
             }
 
-            mtrace("- sending expiry alert to user {$user->id} for course {$course->id}");
-
             $from = \core_user::get_support_user();
-            $subject = get_config('enrolmenttimer', 'enrolmentemailsubject');
-            $body = get_config('enrolmenttimer', 'timeleftmessage');
-
-            if (empty($subject) || empty($body)) {
-                continue;
-            }
-
+            $body = $bodytemplate;
             $body = str_replace('[[user_name]]', fullname($user), $body);
             $body = str_replace('[[course_name]]', $course->fullname, $body);
             $body = str_replace('[[days_to_alert]]',
@@ -268,7 +298,13 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
             $textonlybody = strip_tags($body);
             $result = email_to_user($user, $from, $subject, $textonlybody, $body);
 
-            $alert->sent = $result ? 1 : 0;
+            if ($result) {
+                $alert->sent = 1;
+                mtrace("- expiry alert sent to user {$user->id} for course {$course->id}");
+            } else {
+                mtrace("ERROR: failed to send expiry alert to user {$user->id} (email: {$user->email}) for course {$course->id}");
+                // Leave sent=0 to retry next run, but don't loop forever.
+            }
             $DB->update_record('block_enrolmenttimer', $alert);
         }
     }

@@ -94,6 +94,12 @@ class block_enrolmenttimer extends block_base {
 
         $this->content = new stdClass;
         $this->content->text = '';
+        $this->content->footer = '';
+
+        if (!isloggedin() || isguestuser()) {
+            return $this->content;
+        }
+
         $this->page->requires->js_call_amd('block_enrolmenttimer/scripts', 'initialise');
 
         $timeleft = block_enrolmenttimer_get_remaining_enrolment_period($this->viewoptions);

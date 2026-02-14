@@ -25,10 +25,10 @@
 defined('MOODLE_INTERNAL') || die();
 
 /**
- * Checks the timeleft on enrolment in a given course
+ * Checks the timeleft on enrolment in a given course.
  *
- * @param String $unitstoshow
- * @return array from the XML file
+ * @param string $unitstoshow Comma-separated unit IDs to display.
+ * @return array|false Time remaining broken into units, or false if no end date.
  */
 function block_enrolmenttimer_get_remaining_enrolment_period($unitstoshow) {
     global $COURSE, $USER, $DB;
@@ -36,70 +36,91 @@ function block_enrolmenttimer_get_remaining_enrolment_period($unitstoshow) {
     $context = context_course::instance($COURSE->id);
 
     if (has_capability('moodle/site:config', $context)) {
-        $record = 0;
-    } else {
-        $records = block_enrolmenttimer_get_enrolment_records($USER->id, $COURSE->id);
-        if (isset($records[$USER->id])) {
-            $record = $records[$USER->id];
-        } else {
-            $record = 0;
-        }
-    }
-
-    if (!is_object($record)) {
         return false;
-    } else if ($record->timeend == 0 ) {
-        $timeend = $DB->get_record('enrol', array('enrol' => 'self', 'id' => $record->enrolid), 'enrolenddate');
-        if (isset($timeend->enrolenddate) && (int) $timeend->enrolenddate > 0) {
-            $timedifference = (int) $timeend->enrolenddate - time();
-            $result = array();
-
-            if (empty($unitstoshow)) {
-                // They have not selected any, so show all.
-                $unitstoshow = block_enrolmenttimer_get_units();
-            } else {
-                // Have the selected units, but we only have id's for their values.
-                $unitstoshow = block_enrolmenttimer_sort_units_to_show($unitstoshow);
-            }
-
-            foreach ($unitstoshow as $text => $unit) {
-                if ($timedifference > $unit) {
-                    $count = floor($timedifference / $unit);
-                    $result[$text] = $count;
-                    $timedifference = $timedifference - ($count * $unit);
-                }
-            }
-
-            return $result;
-        } else {
-            return false;
-        }
-    } else {
-        $timedifference = (int)$record->timeend - time();
-        $result = array();
-
-        if (empty($unitstoshow)) {
-            // They have not selected any, so show all.
-            $unitstoshow = block_enrolmenttimer_get_units();
-        } else {
-            // Have the selected units, but we only have id's for their values.
-            $unitstoshow = block_enrolmenttimer_sort_units_to_show($unitstoshow);
-        }
-
-        foreach ($unitstoshow as $text => $unit) {
-            if ($timedifference > $unit) {
-                $count = floor($timedifference / $unit);
-                $result[$text] = $count;
-                $timedifference = $timedifference - ($count * $unit);
-            }
-        }
-
-        return $result;
     }
+
+    // Find the enrolment with the soonest non-zero end date.
+    $record = block_enrolmenttimer_get_best_enrolment_record($USER->id, $COURSE->id);
+
+    if (!$record) {
+        return false;
+    }
+
+    // Determine the effective end time.
+    $endtime = 0;
+    if ($record->timeend != 0) {
+        $endtime = (int)$record->timeend;
+    } else {
+        // Check enrol method end date (any type, not just self-enrolment).
+        $enrol = $DB->get_record('enrol', ['id' => $record->enrolid], 'enrolenddate');
+        if ($enrol && !empty($enrol->enrolenddate) && (int)$enrol->enrolenddate > 0) {
+            $endtime = (int)$enrol->enrolenddate;
+        }
+    }
+
+    if ($endtime <= 0) {
+        return false;
+    }
+
+    $timedifference = $endtime - time();
+    if ($timedifference <= 0) {
+        return false;
+    }
+
+    if (empty($unitstoshow)) {
+        $units = block_enrolmenttimer_get_units();
+    } else {
+        $units = block_enrolmenttimer_sort_units_to_show($unitstoshow);
+    }
+
+    $result = [];
+    foreach ($units as $text => $unit) {
+        if ($timedifference >= $unit) {
+            $count = floor($timedifference / $unit);
+            $result[$text] = $count;
+            $timedifference -= ($count * $unit);
+        }
+    }
+
+    return $result;
 }
 
 /**
- * Return enrolment records.
+ * Find the best enrolment record for display (soonest non-zero end date).
+ *
+ * @param int $userid
+ * @param int $courseid
+ * @return stdClass|false The enrolment record, or false if none found.
+ */
+function block_enrolmenttimer_get_best_enrolment_record($userid, $courseid) {
+    global $DB;
+
+    $records = block_enrolmenttimer_get_enrolment_records($userid, $courseid);
+    if (empty($records)) {
+        return false;
+    }
+
+    // Prefer the enrolment with the soonest non-zero timeend.
+    $best = null;
+    foreach ($records as $r) {
+        if ($r->timeend > 0) {
+            if ($best === null || $r->timeend < $best->timeend) {
+                $best = $r;
+            }
+        }
+    }
+
+    // If all have timeend=0, return first one to check enrol method dates.
+    if ($best === null) {
+        $best = reset($records);
+    }
+
+    return $best;
+}
+
+/**
+ * Return enrolment records keyed by user_enrolments.id.
+ *
  * @param int $userid
  * @param int $courseid
  * @return array
@@ -108,46 +129,59 @@ function block_enrolmenttimer_get_enrolment_records($userid, $courseid) {
     global $DB;
 
     $sql = '
-        SELECT ue.userid, ue.id, ue.timestart, ue.timeend, ue.enrolid
+        SELECT ue.id, ue.userid, ue.timestart, ue.timeend, ue.enrolid
         FROM {user_enrolments} ue
-        JOIN {enrol} e on ue.enrolid = e.id
+        JOIN {enrol} e ON ue.enrolid = e.id
         WHERE ue.userid = ? AND e.courseid = ?
+        ORDER BY ue.timeend ASC
     ';
-    return $DB->get_records_sql($sql, array($userid, $courseid));
+    return $DB->get_records_sql($sql, [$userid, $courseid]);
 }
 
 /**
- * Return the values for different periods.
+ * Return the values for different time periods.
  * @return array
  */
 function block_enrolmenttimer_get_units() {
-    return array (
-        get_string('key_years', 'block_enrolmenttimer')     => 31536000,
-        get_string('key_months', 'block_enrolmenttimer')    => 2592000,
-        get_string('key_weeks', 'block_enrolmenttimer')     => 604800,
-        get_string('key_days', 'block_enrolmenttimer')      => 86400,
-        get_string('key_hours', 'block_enrolmenttimer')     => 3600,
-        get_string('key_minutes', 'block_enrolmenttimer')   => 60,
-        get_string('key_seconds', 'block_enrolmenttimer')   => 1
-    );
+    return [
+        get_string('key_years', 'block_enrolmenttimer')   => 31536000,
+        get_string('key_months', 'block_enrolmenttimer')  => 2592000,
+        get_string('key_weeks', 'block_enrolmenttimer')   => 604800,
+        get_string('key_days', 'block_enrolmenttimer')    => 86400,
+        get_string('key_hours', 'block_enrolmenttimer')   => 3600,
+        get_string('key_minutes', 'block_enrolmenttimer') => 60,
+        get_string('key_seconds', 'block_enrolmenttimer') => 1,
+    ];
 }
 
 /**
- * Sorting the units we will show the user.
- * @param array $idstring
+ * Sort units to show based on comma-separated ID string from config.
+ *
+ * @param string $idstring Comma-separated unit indices (e.g. "0,1,3").
  * @return array
  */
 function block_enrolmenttimer_sort_units_to_show($idstring) {
     $idarray = explode(',', $idstring);
-    // Array of array positions eg 1,2,3 tha where selected on the settings menu.
-
     $units = block_enrolmenttimer_get_units();
     $unitkeys = array_keys($units);
-    $output = array();
+    $maxindex = count($unitkeys) - 1;
+    $output = [];
 
-    foreach ($idarray as $key => $value) {
-        $unitkey = $unitkeys[$value];
+    foreach ($idarray as $value) {
+        $value = trim($value);
+        if ($value === '' || !is_numeric($value)) {
+            continue;
+        }
+        $idx = (int)$value;
+        if ($idx < 0 || $idx > $maxindex) {
+            continue;
+        }
+        $unitkey = $unitkeys[$idx];
         $output[$unitkey] = $units[$unitkey];
+    }
+
+    if (empty($output)) {
+        return block_enrolmenttimer_get_units();
     }
 
     return $output;

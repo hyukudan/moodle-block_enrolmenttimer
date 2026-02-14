@@ -14,27 +14,30 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * @package    block_enrolmenttimer
+ * Live countdown timer for the enrolment timer block.
+ *
+ * @module     block_enrolmenttimer/scripts
  * @copyright  2014 onwards LearningWorks Ltd {@link https://learningworks.co.nz/}
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  * @author     Aaron Leggett
  */
-
-/**
- * @module block_enrolmenttimer/scripts
- */
-define(['jquery'], function($) { // Moodle needs this to recognise $ https://docs.moodle.org/dev/jQuery .
-    // JQuery is available via $.
+define(['jquery'], function($) {
 
     return {
+        /**
+         * Initialise the countdown timer.
+         */
         initialise: function() {
-            // Module initialised.
             $(document).ready(function() {
                 var options = [];
                 var arrayKeys = [];
                 var timestamp = 0;
                 var forceTwoDigits = false;
+                var intervalId = null;
 
+                /**
+                 * Find displayed time unit elements and extract their data-id keys.
+                 */
                 function getDisplayedOptions() {
                     var children = $('.block_enrolmenttimer .active .timer-wrapper').find('.timerNum');
 
@@ -44,6 +47,9 @@ define(['jquery'], function($) { // Moodle needs this to recognise $ https://doc
                     }
                 }
 
+                /**
+                 * Read the initial values from the text description elements.
+                 */
                 function populateWithData() {
                     for (var i = arrayKeys.length - 1; i >= 0; i--) {
                         var option = $('.block_enrolmenttimer .active .text-desc .' + arrayKeys[i]).text();
@@ -51,40 +57,34 @@ define(['jquery'], function($) { // Moodle needs this to recognise $ https://doc
                     }
                 }
 
+                /**
+                 * Convert displayed unit values into a total timestamp in seconds.
+                 */
                 function makeTimestamp() {
-                    for (var i = arrayKeys.length - 1; i >= 0; i--) {
-                        switch (arrayKeys[i]) {
-                            case 'seconds':
-                                timestamp += parseInt(options[arrayKeys[i]], 10);
-                                break;
+                    var unitSeconds = {
+                        'seconds': 1,
+                        'minutes': 60,
+                        'hours': 3600,
+                        'days': 86400,
+                        'weeks': 604800,
+                        'months': 2592000,
+                        'years': 31536000
+                    };
 
-                            case 'minutes':
-                                timestamp += parseInt(options[arrayKeys[i]], 10) * 60;
-                                break;
-
-                            case 'hours':
-                                timestamp += parseInt(options[arrayKeys[i]], 10) * 3600;
-                                break;
-
-                            case 'days':
-                                timestamp += parseInt(options[arrayKeys[i]], 10) * 86400;
-                                break;
-
-                            case 'weeks':
-                                timestamp += parseInt(options[arrayKeys[i]], 10) * 604800;
-                                break;
-
-                            case 'months':
-                                timestamp += parseInt(options[arrayKeys[i]], 10) * 2592000;
-                                break;
-
-                            case 'years':
-                                timestamp += parseInt(options[arrayKeys[i]], 10) * 31536000;
-                                break;
+                    for (var i = 0; i < arrayKeys.length; i++) {
+                        var val = parseInt(options[arrayKeys[i]], 10);
+                        if (!isNaN(val) && unitSeconds[arrayKeys[i]]) {
+                            timestamp += val * unitSeconds[arrayKeys[i]];
                         }
                     }
                 }
 
+                /**
+                 * Update a single counter element in the DOM.
+                 *
+                 * @param {string} counter The unit name (e.g. 'hours').
+                 * @param {number} time The value to display.
+                 */
                 function updateMainCounter(counter, time) {
                     var html = '';
                     if (forceTwoDigits === true && time.toString().length == 1) {
@@ -92,7 +92,8 @@ define(['jquery'], function($) { // Moodle needs this to recognise $ https://doc
                         html += '<span class="timerNumChar" data-id="1">' + time.toString() + '</span>';
                     } else {
                         for (var i = 0; i < time.toString().length; i++) {
-                            html += '<span class="timerNumChar" data-id="' + i + '">' + time.toString().charAt(i) + '</span>';
+                            html += '<span class="timerNumChar" data-id="' + i + '">' +
+                                time.toString().charAt(i) + '</span>';
                         }
                     }
 
@@ -100,14 +101,27 @@ define(['jquery'], function($) { // Moodle needs this to recognise $ https://doc
                     $('.block_enrolmenttimer .active .text-desc .' + counter).html(time);
                 }
 
+                /**
+                 * Decrement the timestamp and update all displayed counters.
+                 */
                 function updateLiveCounter() {
+                    if (timestamp <= 0) {
+                        if (intervalId !== null) {
+                            window.clearInterval(intervalId);
+                            intervalId = null;
+                        }
+                        for (var j = 0; j < arrayKeys.length; j++) {
+                            updateMainCounter(arrayKeys[j], 0);
+                        }
+                        return;
+                    }
+
                     timestamp--;
                     var time = timestamp;
                     var tokens = ['years', 'months', 'weeks', 'days', 'hours', 'minutes', 'seconds'];
-                    var units = ['31536000', '2592000', '604800', '86400', '3600', '60', '1'];
+                    var units = [31536000, 2592000, 604800, 86400, 3600, 60, 1];
 
                     for (var i = 0; i < tokens.length; i++) {
-
                         if (arrayKeys.indexOf(tokens[i]) != -1) {
                             if (time >= units[i]) {
                                 var count = Math.floor(time / units[i]);
@@ -121,18 +135,17 @@ define(['jquery'], function($) { // Moodle needs this to recognise $ https://doc
                 }
 
                 if ($('.block_enrolmenttimer .active').length > 0) {
+                    if ($('.block_enrolmenttimer .timer-wrapper[data-id=force2]').length > 0) {
+                        forceTwoDigits = true;
+                    }
+
                     getDisplayedOptions();
                     populateWithData();
                     makeTimestamp();
 
-                    // Create timer.
-                    window.setInterval(function() {
+                    intervalId = window.setInterval(function() {
                         updateLiveCounter();
                     }, 1000);
-                }
-
-                if ($('.block_enrolmenttimer .timer-wrapper[data-id=force2]').length > 0) {
-                    forceTwoDigits = true;
                 }
             });
         }
