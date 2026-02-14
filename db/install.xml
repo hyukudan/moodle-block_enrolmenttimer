@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<XMLDB PATH="blocks/enrolmenttimer/db" VERSION="20260215" COMMENT="XMLDB file for Moodle blocks/enrolmenttimer"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="../../../lib/xmldb/xmldb.xsd"
+>
+  <TABLES>
+    <TABLE NAME="block_enrolmenttimer" COMMENT="Stores enrolment expiry alert records for the enrolment timer block">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="enrolid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="References user_enrolments.id"/>
+        <FIELD NAME="alerttime" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Timestamp when the alert should be sent"/>
+        <FIELD NAME="sent" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Whether the alert email has been sent (0=no, 1=yes)"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="enrolid_idx" UNIQUE="false" FIELDS="enrolid"/>
+        <INDEX NAME="sent_alerttime_idx" UNIQUE="false" FIELDS="sent, alerttime"/>
+      </INDEXES>
+    </TABLE>
+  </TABLES>
+</XMLDB>
