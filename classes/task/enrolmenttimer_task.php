@@ -184,13 +184,18 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
     }
 
     /**
-     * Send completion email if the user has completed the course.
+     * Send completion email if the user meets the completion percentage threshold.
+     *
+     * Checks both course completion status and grade percentage against the
+     * configured threshold. If completionpercentage is 100, only course
+     * completion is required. Below 100, the user's course grade must meet
+     * or exceed the threshold.
      *
      * @param \stdClass $user
      * @param \stdClass $course
      */
     private function process_completion_email($user, $course) {
-        global $DB;
+        global $CFG, $DB;
 
         $prefkey = 'block_enrolmenttimer_completion_' . $course->id;
         $already = get_user_preferences($prefkey, null, $user->id);
@@ -198,24 +203,46 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
             return;
         }
 
-        $completion = $DB->get_record('course_completions', [
-            'userid' => $user->id,
-            'course' => $course->id,
-        ]);
-
-        if (!$completion) {
-            return;
+        $threshold = get_config('enrolmenttimer', 'completionpercentage');
+        if ($threshold === false || !is_numeric($threshold)) {
+            $threshold = 100;
         }
+        $threshold = (float)$threshold;
 
-        $completedtime = null;
-        if (!empty($completion->timecompleted)) {
-            $completedtime = $completion->timecompleted;
-        } else if (!empty($completion->reaggregate)) {
-            $completedtime = $completion->reaggregate;
-        }
+        if ($threshold >= 100) {
+            // Standard mode: require full course completion.
+            $completion = $DB->get_record('course_completions', [
+                'userid' => $user->id,
+                'course' => $course->id,
+            ]);
 
-        if (!$completedtime) {
-            return;
+            if (!$completion) {
+                return;
+            }
+
+            if (empty($completion->timecompleted) && empty($completion->reaggregate)) {
+                return;
+            }
+        } else {
+            // Percentage mode: check grade against threshold.
+            require_once($CFG->libdir . '/gradelib.php');
+            $gradeobj = grade_get_course_grade($user->id, $course->id);
+
+            if (!$gradeobj || !isset($gradeobj->grade) || $gradeobj->grade === null || $gradeobj->grade === '') {
+                return;
+            }
+
+            if ($gradeobj->grade < 0) {
+                return;
+            }
+
+            $grademax = (isset($gradeobj->item) && $gradeobj->item->grademax > 0)
+                ? (float)$gradeobj->item->grademax : 100.0;
+            $percentage = ((float)$gradeobj->grade / $grademax) * 100;
+
+            if ($percentage < $threshold) {
+                return;
+            }
         }
 
         $from = \core_user::get_support_user();
@@ -226,15 +253,24 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
             return;
         }
 
-        $body = str_replace('[[user_name]]', fullname($user), $body);
-        $body = str_replace('[[course_name]]', $course->fullname, $body);
+        // Calculate actual percentage for the placeholder.
+        require_once($CFG->libdir . '/gradelib.php');
+        $gradeobj = grade_get_course_grade($user->id, $course->id);
+        $pct = 100;
+        if ($gradeobj && isset($gradeobj->grade) && $gradeobj->grade !== null) {
+            $grademax = (isset($gradeobj->item) && $gradeobj->item->grademax > 0)
+                ? (float)$gradeobj->item->grademax : 100.0;
+            $pct = round(((float)$gradeobj->grade / $grademax) * 100, 1);
+        }
 
-        $textonlybody = strip_tags($body);
-        $result = email_to_user($user, $from, $subject, $textonlybody, $body);
+        $body = $this->replace_placeholders($body, $user, $course);
+        $body = str_replace('[[percentage]]', $pct . '%', $body);
 
-        if ($result) {
+        $messageid = $this->send_notification($user, $course, $subject, $body, 'completion_notification');
+
+        if ($messageid) {
             set_user_preference($prefkey, time(), $user->id);
-            mtrace("- completion email sent to user {$user->id} for course {$course->id}");
+            mtrace("- completion email sent to user {$user->id} for course {$course->id} (grade: {$pct}%)");
         } else {
             mtrace("ERROR: failed to send completion email to user {$user->id} (email: {$user->email}) for course {$course->id}");
         }
@@ -288,24 +324,100 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
                 continue;
             }
 
-            $from = \core_user::get_support_user();
             $body = $bodytemplate;
-            $body = str_replace('[[user_name]]', fullname($user), $body);
-            $body = str_replace('[[course_name]]', $course->fullname, $body);
+            $body = $this->replace_placeholders($body, $user, $course);
             $body = str_replace('[[days_to_alert]]',
                 get_config('enrolmenttimer', 'daystoalertenrolmentend'), $body);
 
-            $textonlybody = strip_tags($body);
-            $result = email_to_user($user, $from, $subject, $textonlybody, $body);
+            // Calculate days remaining for this specific enrolment.
+            $endtime = $enrolinstance->timeend;
+            if ($endtime == 0 && !empty($enrol->enrolenddate)) {
+                $endtime = $enrol->enrolenddate;
+            }
+            $daysrem = ($endtime > 0) ? max(0, (int)ceil(($endtime - time()) / 86400)) : 0;
+            $body = str_replace('[[days_remaining]]', (string)$daysrem, $body);
+            if ($endtime > 0) {
+                $body = str_replace('[[expiry_date]]',
+                    userdate($endtime, get_string('strftimedatetime', 'langconfig')), $body);
+            }
 
-            if ($result) {
+            $messageid = $this->send_notification($user, $course, $subject, $body, 'expiry_alert');
+
+            if ($messageid) {
                 $alert->sent = 1;
                 mtrace("- expiry alert sent to user {$user->id} for course {$course->id}");
             } else {
                 mtrace("ERROR: failed to send expiry alert to user {$user->id} (email: {$user->email}) for course {$course->id}");
-                // Leave sent=0 to retry next run, but don't loop forever.
             }
             $DB->update_record('block_enrolmenttimer', $alert);
+        }
+    }
+
+    /**
+     * Replace common placeholders in an email body.
+     *
+     * @param string $body The template body.
+     * @param \stdClass $user The user object.
+     * @param \stdClass $course The course object.
+     * @return string The body with placeholders replaced.
+     */
+    private function replace_placeholders($body, $user, $course) {
+        global $CFG;
+
+        $courseurl = new \moodle_url('/course/view.php', ['id' => $course->id]);
+
+        return str_replace(
+            [
+                '[[user_name]]',
+                '[[user_firstname]]',
+                '[[course_name]]',
+                '[[course_shortname]]',
+                '[[course_url]]',
+                '[[site_name]]',
+            ],
+            [
+                fullname($user),
+                $user->firstname,
+                $course->fullname,
+                $course->shortname,
+                $courseurl->out(false),
+                format_string($CFG->fullname),
+            ],
+            $body
+        );
+    }
+
+    /**
+     * Send a notification using Moodle's Message API.
+     *
+     * @param \stdClass $user The recipient user.
+     * @param \stdClass $course The course context.
+     * @param string $subject The message subject.
+     * @param string $body The HTML message body.
+     * @param string $messagename The message provider name ('expiry_alert' or 'completion_notification').
+     * @return int|false The message ID on success, or false on failure.
+     */
+    private function send_notification($user, $course, $subject, $body, $messagename) {
+        $message = new \core\message\message();
+        $message->component = 'block_enrolmenttimer';
+        $message->name = $messagename;
+        $message->userfrom = \core_user::get_noreply_user();
+        $message->userto = $user;
+        $message->subject = $subject;
+        $message->fullmessage = strip_tags($body);
+        $message->fullmessageformat = FORMAT_HTML;
+        $message->fullmessagehtml = $body;
+        $message->smallmessage = $subject;
+        $message->notification = 1;
+        $message->courseid = $course->id;
+        $message->contexturl = new \moodle_url('/course/view.php', ['id' => $course->id]);
+        $message->contexturlname = $course->fullname;
+
+        try {
+            return message_send($message);
+        } catch (\Exception $e) {
+            mtrace("ERROR: message_send failed: " . $e->getMessage());
+            return false;
         }
     }
 }

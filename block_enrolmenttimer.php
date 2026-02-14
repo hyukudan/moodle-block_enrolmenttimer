@@ -67,6 +67,7 @@ class block_enrolmenttimer extends block_base {
             'course-view' => true,
             'course-view-social' => true,
             'mod' => true,
+            'my' => true,
         ];
     }
 
@@ -128,7 +129,8 @@ class block_enrolmenttimer extends block_base {
 
             $this->content->text .= '<hr>';
             $this->content->text .= '<div class="visual-counter">';
-            $this->content->text .= '<div class="timer-wrapper"';
+            $this->content->text .= '<div class="timer-wrapper" role="timer"' .
+                ' aria-label="' . s(get_string('expirytext', 'block_enrolmenttimer')) . '"';
             if ($force2digits == 1) {
                 $this->content->text .= ' data-id="force2" ';
             }
@@ -185,6 +187,48 @@ class block_enrolmenttimer extends block_base {
             $this->content->text .= '<p class="sub-text">' .
                 get_string('expirytext', 'block_enrolmenttimer') . '</p>';
             $this->content->text .= '</div>';
+
+            // Urgency alert, progress bar, and exact expiry date.
+            $enrolinfo = block_enrolmenttimer_get_enrolment_info();
+            if ($enrolinfo) {
+                // Urgency alerts.
+                $daysrem = $enrolinfo['daysremaining'];
+                if ($daysrem <= 3 && $daysrem > 0) {
+                    $this->content->text .= '<div class="alert alert-danger mt-2 p-2 small">' .
+                        get_string('expiring_soon', 'block_enrolmenttimer') . '</div>';
+                } else if ($daysrem <= 7) {
+                    $this->content->text .= '<div class="alert alert-warning mt-2 p-2 small">' .
+                        get_string('expiring_warning', 'block_enrolmenttimer') . '</div>';
+                }
+
+                // Progress bar.
+                $showprogress = get_config('enrolmenttimer', 'showprogressbar');
+                if ($showprogress && $enrolinfo['progress'] > 0) {
+                    $pct = $enrolinfo['progress'];
+                    $barclass = 'bg-success';
+                    if ($pct >= 80) {
+                        $barclass = 'bg-danger';
+                    } else if ($pct >= 50) {
+                        $barclass = 'bg-warning';
+                    }
+                    $arialabel = get_string('progress_elapsed', 'block_enrolmenttimer', $pct);
+                    $this->content->text .= '<div class="progress mt-2" style="height: 8px;"' .
+                        ' title="' . s($arialabel) . '">';
+                    $this->content->text .= '<div class="progress-bar ' . $barclass . '"' .
+                        ' role="progressbar" style="width: ' . $pct . '%"' .
+                        ' aria-valuenow="' . $pct . '" aria-valuemin="0" aria-valuemax="100"' .
+                        ' aria-label="' . s($arialabel) . '"></div>';
+                    $this->content->text .= '</div>';
+                }
+
+                // Exact expiry date.
+                $showexpirydate = get_config('enrolmenttimer', 'showexpirydate');
+                if ($showexpirydate && $enrolinfo['endtime'] > 0) {
+                    $datestr = userdate($enrolinfo['endtime'], get_string('strftimedatetime', 'langconfig'));
+                    $this->content->text .= '<p class="small text-muted mt-1 mb-0">' .
+                        get_string('expirydate', 'block_enrolmenttimer', $datestr) . '</p>';
+                }
+            }
         }
         $this->content->text .= '</div>';
         $this->content->footer = '';

@@ -15,16 +15,21 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * Version File
+ * Cache definitions for the enrolment timer block.
  *
  * @package    block_enrolmenttimer
  * @copyright  LearningWorks Ltd 2016
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-defined('MOODLE_INTERNAL') || die();
-$plugin->version   = 2026021501;
-$plugin->requires  = 2024100700; // Moodle 4.5+.
-$plugin->component = 'block_enrolmenttimer';
-$plugin->maturity  = MATURITY_STABLE;
-$plugin->release   = '5.2.0';
+defined('MOODLE_INTERNAL') || die;
+
+$definitions = [
+    'enrolmentdata' => [
+        'mode' => cache_store::MODE_REQUEST,
+        'simplekeys' => true,
+        'simpledata' => false,
+        'staticacceleration' => true,
+        'staticaccelerationsize' => 50,
+    ],
+];

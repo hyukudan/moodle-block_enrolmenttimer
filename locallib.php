@@ -120,6 +120,7 @@ function block_enrolmenttimer_get_best_enrolment_record($userid, $courseid) {
 
 /**
  * Return enrolment records keyed by user_enrolments.id.
+ * Results are cached per-request to avoid repeated DB queries.
  *
  * @param int $userid
  * @param int $courseid
@@ -128,6 +129,14 @@ function block_enrolmenttimer_get_best_enrolment_record($userid, $courseid) {
 function block_enrolmenttimer_get_enrolment_records($userid, $courseid) {
     global $DB;
 
+    $cache = cache::make('block_enrolmenttimer', 'enrolmentdata');
+    $cachekey = $userid . '_' . $courseid;
+    $records = $cache->get($cachekey);
+
+    if ($records !== false) {
+        return $records;
+    }
+
     $sql = '
         SELECT ue.id, ue.userid, ue.timestart, ue.timeend, ue.enrolid
         FROM {user_enrolments} ue
@@ -135,7 +144,9 @@ function block_enrolmenttimer_get_enrolment_records($userid, $courseid) {
         WHERE ue.userid = ? AND e.courseid = ?
         ORDER BY ue.timeend ASC
     ';
-    return $DB->get_records_sql($sql, [$userid, $courseid]);
+    $records = $DB->get_records_sql($sql, [$userid, $courseid]);
+    $cache->set($cachekey, $records);
+    return $records;
 }
 
 /**
@@ -185,4 +196,66 @@ function block_enrolmenttimer_sort_units_to_show($idstring) {
     }
 
     return $output;
+}
+
+/**
+ * Get enrolment end timestamp and progress data for the current user in a course.
+ *
+ * @return array|false ['endtime' => int, 'starttime' => int, 'progress' => float, 'daysremaining' => int]
+ */
+function block_enrolmenttimer_get_enrolment_info() {
+    global $COURSE, $USER, $DB;
+
+    $context = context_course::instance($COURSE->id);
+    if (has_capability('moodle/site:config', $context)) {
+        return false;
+    }
+
+    $record = block_enrolmenttimer_get_best_enrolment_record($USER->id, $COURSE->id);
+    if (!$record) {
+        return false;
+    }
+
+    $endtime = 0;
+    if ($record->timeend != 0) {
+        $endtime = (int)$record->timeend;
+    } else {
+        $enrol = $DB->get_record('enrol', ['id' => $record->enrolid], 'enrolenddate');
+        if ($enrol && !empty($enrol->enrolenddate) && (int)$enrol->enrolenddate > 0) {
+            $endtime = (int)$enrol->enrolenddate;
+        }
+    }
+
+    if ($endtime <= 0) {
+        return false;
+    }
+
+    $starttime = (int)$record->timestart;
+    $now = time();
+    $timediff = $endtime - $now;
+
+    if ($timediff <= 0) {
+        return [
+            'endtime' => $endtime,
+            'starttime' => $starttime,
+            'progress' => 100.0,
+            'daysremaining' => 0,
+            'expired' => true,
+        ];
+    }
+
+    $progress = 0.0;
+    if ($starttime > 0 && $endtime > $starttime) {
+        $total = $endtime - $starttime;
+        $elapsed = $now - $starttime;
+        $progress = min(100.0, max(0.0, ($elapsed / $total) * 100));
+    }
+
+    return [
+        'endtime' => $endtime,
+        'starttime' => $starttime,
+        'progress' => round($progress, 1),
+        'daysremaining' => (int)ceil($timediff / 86400),
+        'expired' => false,
+    ];
 }

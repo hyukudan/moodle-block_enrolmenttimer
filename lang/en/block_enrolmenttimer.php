@@ -54,7 +54,7 @@ $string['daystoalertenrolmentend_help'] = 'The amount of days before the enrollm
 $string['timeleftmessagechk'] = 'Enable Time Warning Email';
 $string['timeleftmessagechk_help'] = 'Enables/Disables alert email';
 $string['timeleftmessage'] = 'Time Remaining Warning Message';
-$string['timeleftmessage_help'] = 'Email that will be sent to the student advising how much time they have left on the course eg 10 days left. Here you can use the following customisations; [[user_name]] [[course_name]] [[days_to_alert]]';
+$string['timeleftmessage_help'] = 'Email sent to students before their enrolment expires. Placeholders: [[user_name]] [[user_firstname]] [[course_name]] [[course_shortname]] [[days_to_alert]] [[days_remaining]] [[expiry_date]] [[course_url]] [[site_name]]';
 $string['emailsubject'] = 'Email Subject';
 $string['emailsubject_help'] = 'Subject of the email that will be sent to the user';
 $string['emailsubject_expiring_default'] = 'Enrolment Expiring';
@@ -63,9 +63,9 @@ $string['emailsubject_completion_default'] = 'Course Completed';
 $string['completionsmessagechk'] = 'Enable Completion Email';
 $string['completionsmessagechk_help'] = 'Enables/Disables the completion email';
 $string['completionsmessage'] = 'Course Completion Email';
-$string['completionsmessage_help'] = 'Email that will be sent congratulating the student on completing of the course. Here you can use the following customisations; [[user_name]] [[course_name]]';
+$string['completionsmessage_help'] = 'Email that will be sent congratulating the student on completing the course. Placeholders: [[user_name]] [[course_name]] [[percentage]]';
 $string['completionpercentage'] = 'Notification percentage';
-$string['completionpercentage_help'] = 'This is the percentage the student must acquire in the \'Course Total\' for the completion email to be sent to them';
+$string['completionpercentage_help'] = 'The minimum percentage in the Course Total grade for the completion email to be sent. Set to 100 to only send on full course completion. Values below 100 trigger based on grade percentage instead.';
 
 $string['key_years'] = 'years';
 $string['key_months'] = 'months';
@@ -74,6 +74,19 @@ $string['key_days'] = 'days';
 $string['key_hours'] = 'hours';
 $string['key_minutes'] = 'minutes';
 $string['key_seconds'] = 'seconds';
+
+$string['showprogressbar'] = 'Show progress bar';
+$string['showprogressbar_help'] = 'Display a visual progress bar showing the percentage of enrolment time that has elapsed.';
+$string['showexpirydate'] = 'Show exact expiry date';
+$string['showexpirydate_help'] = 'Display the exact enrolment expiry date and time below the countdown timer.';
+$string['expiring_soon'] = 'Your access to this course expires very soon!';
+$string['expiring_warning'] = 'Your course access is expiring in the next few days.';
+$string['expired'] = 'Your enrolment has expired.';
+$string['expirydate'] = 'Expires: {$a}';
+$string['progress_elapsed'] = '{$a}% of enrolment time elapsed';
+
+$string['messageprovider:expiry_alert'] = 'Enrolment expiry alerts';
+$string['messageprovider:completion_notification'] = 'Course completion notifications';
 
 $string['privacy:metadata'] = 'The Enrolment Timer block stores enrolment alert data linked to user enrolments.';
 $string['privacy:metadata:block_enrolmenttimer'] = 'Records of enrolment expiry alerts scheduled or sent to users.';

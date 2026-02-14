@@ -67,6 +67,20 @@ if ($ADMIN->fulltree) {
         1
     ));
 
+    $settings->add(new admin_setting_configcheckbox(
+        'enrolmenttimer/showprogressbar',
+        get_string('showprogressbar', 'block_enrolmenttimer'),
+        get_string('showprogressbar_help', 'block_enrolmenttimer'),
+        0
+    ));
+
+    $settings->add(new admin_setting_configcheckbox(
+        'enrolmenttimer/showexpirydate',
+        get_string('showexpirydate', 'block_enrolmenttimer'),
+        get_string('showexpirydate_help', 'block_enrolmenttimer'),
+        0
+    ));
+
     $options = array_keys(block_enrolmenttimer_get_units());
     $settings->add(new admin_setting_configmultiselect(
         'enrolmenttimer/viewoptions',

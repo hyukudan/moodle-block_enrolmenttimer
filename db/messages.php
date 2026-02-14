@@ -15,16 +15,26 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * Version File
+ * Message providers for the enrolment timer block.
  *
  * @package    block_enrolmenttimer
  * @copyright  LearningWorks Ltd 2016
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-defined('MOODLE_INTERNAL') || die();
-$plugin->version   = 2026021501;
-$plugin->requires  = 2024100700; // Moodle 4.5+.
-$plugin->component = 'block_enrolmenttimer';
-$plugin->maturity  = MATURITY_STABLE;
-$plugin->release   = '5.2.0';
+defined('MOODLE_INTERNAL') || die;
+
+$messageproviders = [
+    'expiry_alert' => [
+        'defaults' => [
+            'popup' => MESSAGE_PERMITTED + MESSAGE_DEFAULT_ENABLED,
+            'email' => MESSAGE_PERMITTED + MESSAGE_DEFAULT_ENABLED,
+        ],
+    ],
+    'completion_notification' => [
+        'defaults' => [
+            'popup' => MESSAGE_PERMITTED + MESSAGE_DEFAULT_ENABLED,
+            'email' => MESSAGE_PERMITTED + MESSAGE_DEFAULT_ENABLED,
+        ],
+    ],
+];
