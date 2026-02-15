@@ -362,9 +362,8 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
      * @return string The body with placeholders replaced.
      */
     private function replace_placeholders($body, $user, $course) {
-        global $CFG;
-
         $courseurl = new \moodle_url('/course/view.php', ['id' => $course->id]);
+        $site = get_site();
 
         return str_replace(
             [
@@ -381,7 +380,7 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
                 $course->fullname,
                 $course->shortname,
                 $courseurl->out(false),
-                format_string($CFG->fullname),
+                format_string($site->fullname),
             ],
             $body
         );
