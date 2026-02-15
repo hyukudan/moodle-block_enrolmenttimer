@@ -29,6 +29,7 @@ $string['enrolmenttimer:myaddinstance'] = 'Add Enrolment Timer to Dashboard';
 $string['expirytext'] = 'until your enrollment expires';
 $string['noDateSet'] = 'Your enrolment does not expire';
 $string['instance_title'] = 'Set the title of this block instance';
+$string['instance_custommessage'] = 'Custom message';
 $string['settings_notifications_alert'] = 'Alert Email Notifications Settings';
 $string['settings_notifications_completion'] = 'Completion Email Notifications Settings';
 $string['settings_notifications_defaults'] = 'Set defaults for instance settings';
@@ -84,6 +85,18 @@ $string['expiring_warning'] = 'Your course access is expiring in the next few da
 $string['expired'] = 'Your enrolment has expired.';
 $string['expirydate'] = 'Expires: {$a}';
 $string['progress_elapsed'] = '{$a}% of enrolment time elapsed';
+
+$string['urgency_danger_days'] = 'Danger alert threshold (days)';
+$string['urgency_danger_days_help'] = 'Show a danger alert when enrolment expires within this many days. Default: 3.';
+$string['urgency_warning_days'] = 'Warning alert threshold (days)';
+$string['urgency_warning_days_help'] = 'Show a warning alert when enrolment expires within this many days. Default: 7.';
+$string['progress_warning_pct'] = 'Progress bar warning threshold (%)';
+$string['progress_warning_pct_help'] = 'Progress bar turns yellow when elapsed percentage reaches this value. Default: 50.';
+$string['progress_danger_pct'] = 'Progress bar danger threshold (%)';
+$string['progress_danger_pct_help'] = 'Progress bar turns red when elapsed percentage reaches this value. Default: 80.';
+
+$string['event_alert_sent'] = 'Enrolment expiry alert sent';
+$string['event_completion_email_sent'] = 'Completion email sent';
 
 $string['messageprovider:expiry_alert'] = 'Enrolment expiry alerts';
 $string['messageprovider:completion_notification'] = 'Course completion notifications';

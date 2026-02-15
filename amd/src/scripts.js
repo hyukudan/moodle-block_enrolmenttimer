@@ -16,6 +16,9 @@
 /**
  * Live countdown timer for the enrolment timer block.
  *
+ * Uses stable data-unit attributes (language-independent) and wall-clock
+ * timing to avoid drift from setInterval inaccuracies and tab throttling.
+ *
  * @module     block_enrolmenttimer/scripts
  * @copyright  2014 onwards LearningWorks Ltd {@link https://learningworks.co.nz/}
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -29,107 +32,100 @@ define(['jquery'], function($) {
          */
         initialise: function() {
             $(document).ready(function() {
-                var options = [];
-                var arrayKeys = [];
-                var timestamp = 0;
+                var activeUnits = [];
                 var forceTwoDigits = false;
                 var intervalId = null;
+                var endTime = 0;
+
+                var unitSeconds = {
+                    'years': 31536000,
+                    'months': 2592000,
+                    'weeks': 604800,
+                    'days': 86400,
+                    'hours': 3600,
+                    'minutes': 60,
+                    'seconds': 1
+                };
 
                 /**
-                 * Find displayed time unit elements and extract their data-id keys.
+                 * Find displayed time unit elements using stable data-unit attributes.
                  */
-                function getDisplayedOptions() {
-                    var children = $('.block_enrolmenttimer .active .timer-wrapper').find('.timerNum');
-
-                    for (var i = children.length - 1; i >= 0; i--) {
-                        var arrayKey = $(children[i]).attr('data-id');
-                        arrayKeys.push(arrayKey);
-                    }
+                function getDisplayedUnits() {
+                    var children = $('.block_enrolmenttimer .active .timer-wrapper').find('.timerNum[data-unit]');
+                    children.each(function() {
+                        activeUnits.push($(this).attr('data-unit'));
+                    });
                 }
 
                 /**
-                 * Read the initial values from the text description elements.
+                 * Calculate initial total seconds from text description spans using data-unit.
                  */
-                function populateWithData() {
-                    for (var i = arrayKeys.length - 1; i >= 0; i--) {
-                        var option = $('.block_enrolmenttimer .active .text-desc .' + arrayKeys[i]).text();
-                        options[arrayKeys[i]] = option;
-                    }
-                }
-
-                /**
-                 * Convert displayed unit values into a total timestamp in seconds.
-                 */
-                function makeTimestamp() {
-                    var unitSeconds = {
-                        'seconds': 1,
-                        'minutes': 60,
-                        'hours': 3600,
-                        'days': 86400,
-                        'weeks': 604800,
-                        'months': 2592000,
-                        'years': 31536000
-                    };
-
-                    for (var i = 0; i < arrayKeys.length; i++) {
-                        var val = parseInt(options[arrayKeys[i]], 10);
-                        if (!isNaN(val) && unitSeconds[arrayKeys[i]]) {
-                            timestamp += val * unitSeconds[arrayKeys[i]];
+                function calculateInitialTimestamp() {
+                    var timestamp = 0;
+                    for (var i = 0; i < activeUnits.length; i++) {
+                        var unitKey = activeUnits[i];
+                        var val = parseInt(
+                            $('.block_enrolmenttimer .active .text-desc [data-unit="' + unitKey + '"]').text(),
+                            10
+                        );
+                        if (!isNaN(val) && unitSeconds[unitKey]) {
+                            timestamp += val * unitSeconds[unitKey];
                         }
                     }
+                    return timestamp;
                 }
 
                 /**
                  * Update a single counter element in the DOM.
                  *
-                 * @param {string} counter The unit name (e.g. 'hours').
+                 * @param {string} unitKey The stable unit key (e.g. 'hours').
                  * @param {number} time The value to display.
                  */
-                function updateMainCounter(counter, time) {
+                function updateMainCounter(unitKey, time) {
                     var html = '';
-                    if (forceTwoDigits === true && time.toString().length == 1) {
+                    var timeStr = time.toString();
+                    if (forceTwoDigits === true && timeStr.length === 1) {
                         html += '<span class="timerNumChar" data-id="0">0</span>';
-                        html += '<span class="timerNumChar" data-id="1">' + time.toString() + '</span>';
+                        html += '<span class="timerNumChar" data-id="1">' + timeStr + '</span>';
                     } else {
-                        for (var i = 0; i < time.toString().length; i++) {
+                        for (var i = 0; i < timeStr.length; i++) {
                             html += '<span class="timerNumChar" data-id="' + i + '">' +
-                                time.toString().charAt(i) + '</span>';
+                                timeStr.charAt(i) + '</span>';
                         }
                     }
 
-                    $('.block_enrolmenttimer .active .timer-wrapper .timerNum[data-id="' + counter + '"]').html(html);
-                    $('.block_enrolmenttimer .active .text-desc .' + counter).html(time);
+                    $('.block_enrolmenttimer .active .timer-wrapper .timerNum[data-unit="' + unitKey + '"]')
+                        .html(html);
+                    $('.block_enrolmenttimer .active .text-desc [data-unit="' + unitKey + '"]')
+                        .html(time);
                 }
 
                 /**
-                 * Decrement the timestamp and update all displayed counters.
+                 * Calculate remaining time from wall clock and update all displayed counters.
                  */
                 function updateLiveCounter() {
-                    if (timestamp <= 0) {
+                    var remaining = Math.max(0, Math.floor((endTime - Date.now()) / 1000));
+
+                    if (remaining <= 0) {
                         if (intervalId !== null) {
                             window.clearInterval(intervalId);
                             intervalId = null;
                         }
-                        for (var j = 0; j < arrayKeys.length; j++) {
-                            updateMainCounter(arrayKeys[j], 0);
+                        for (var j = 0; j < activeUnits.length; j++) {
+                            updateMainCounter(activeUnits[j], 0);
                         }
                         return;
                     }
 
-                    timestamp--;
-                    var time = timestamp;
+                    var time = remaining;
                     var tokens = ['years', 'months', 'weeks', 'days', 'hours', 'minutes', 'seconds'];
                     var units = [31536000, 2592000, 604800, 86400, 3600, 60, 1];
 
                     for (var i = 0; i < tokens.length; i++) {
-                        if (arrayKeys.indexOf(tokens[i]) != -1) {
-                            if (time >= units[i]) {
-                                var count = Math.floor(time / units[i]);
-                                updateMainCounter(tokens[i], count);
-                                time = time - (count * units[i]);
-                            } else {
-                                updateMainCounter(tokens[i], 0);
-                            }
+                        if (activeUnits.indexOf(tokens[i]) !== -1) {
+                            var count = Math.floor(time / units[i]);
+                            updateMainCounter(tokens[i], count);
+                            time = time - (count * units[i]);
                         }
                     }
                 }
@@ -139,13 +135,25 @@ define(['jquery'], function($) {
                         forceTwoDigits = true;
                     }
 
-                    getDisplayedOptions();
-                    populateWithData();
-                    makeTimestamp();
+                    getDisplayedUnits();
+                    var initialSeconds = calculateInitialTimestamp();
+                    endTime = Date.now() + (initialSeconds * 1000);
 
                     intervalId = window.setInterval(function() {
                         updateLiveCounter();
                     }, 1000);
+
+                    // Handle tab visibility changes to keep timer accurate.
+                    if (typeof document.addEventListener === 'function') {
+                        document.addEventListener('visibilitychange', function() {
+                            if (!document.hidden && intervalId === null && endTime > Date.now()) {
+                                intervalId = window.setInterval(function() {
+                                    updateLiveCounter();
+                                }, 1000);
+                                updateLiveCounter();
+                            }
+                        });
+                    }
                 }
             });
         }

@@ -81,6 +81,40 @@ if ($ADMIN->fulltree) {
         0
     ));
 
+    // Urgency alert thresholds.
+    $settings->add(new admin_setting_configtext(
+        'enrolmenttimer/urgency_danger_days',
+        get_string('urgency_danger_days', 'block_enrolmenttimer'),
+        get_string('urgency_danger_days_help', 'block_enrolmenttimer'),
+        '3',
+        PARAM_INT
+    ));
+
+    $settings->add(new admin_setting_configtext(
+        'enrolmenttimer/urgency_warning_days',
+        get_string('urgency_warning_days', 'block_enrolmenttimer'),
+        get_string('urgency_warning_days_help', 'block_enrolmenttimer'),
+        '7',
+        PARAM_INT
+    ));
+
+    // Progress bar color thresholds.
+    $settings->add(new admin_setting_configtext(
+        'enrolmenttimer/progress_warning_pct',
+        get_string('progress_warning_pct', 'block_enrolmenttimer'),
+        get_string('progress_warning_pct_help', 'block_enrolmenttimer'),
+        '50',
+        PARAM_INT
+    ));
+
+    $settings->add(new admin_setting_configtext(
+        'enrolmenttimer/progress_danger_pct',
+        get_string('progress_danger_pct', 'block_enrolmenttimer'),
+        get_string('progress_danger_pct_help', 'block_enrolmenttimer'),
+        '80',
+        PARAM_INT
+    ));
+
     $options = array_keys(block_enrolmenttimer_get_units());
     $settings->add(new admin_setting_configmultiselect(
         'enrolmenttimer/viewoptions',
@@ -105,7 +139,8 @@ if ($ADMIN->fulltree) {
         'enrolmenttimer/daystoalertenrolmentend',
         get_string('daystoalertenrolmentend', 'block_enrolmenttimer'),
         get_string('daystoalertenrolmentend_help', 'block_enrolmenttimer'),
-        '10'
+        '10',
+        PARAM_INT
     ));
 
     $settings->add(new admin_setting_configtext(
@@ -137,7 +172,8 @@ if ($ADMIN->fulltree) {
         'enrolmenttimer/completionpercentage',
         get_string('completionpercentage', 'block_enrolmenttimer'),
         get_string('completionpercentage_help', 'block_enrolmenttimer'),
-        '100'
+        '100',
+        PARAM_INT
     ));
 
     $settings->add(new admin_setting_configtext(

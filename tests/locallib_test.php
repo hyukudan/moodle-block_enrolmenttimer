@@ -525,6 +525,92 @@ class locallib_test extends advanced_testcase {
     }
 
     /**
+     * Test resolve_end_time returns timeend when set.
+     */
+    public function test_resolve_end_time_with_timeend() {
+        $this->resetAfterTest(true);
+
+        $record = new \stdClass();
+        $record->id = 1;
+        $record->timeend = time() + 86400;
+        $record->enrolid = 1;
+
+        $result = block_enrolmenttimer_resolve_end_time($record);
+        $this->assertEquals($record->timeend, $result);
+    }
+
+    /**
+     * Test resolve_end_time falls back to enrol.enrolenddate.
+     */
+    public function test_resolve_end_time_fallback_enrolenddate() {
+        global $DB;
+
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $user = $this->getDataGenerator()->create_user();
+
+        $manualenrol = $DB->get_record('enrol', ['courseid' => $course->id, 'enrol' => 'manual']);
+        $enrolenddate = time() + (30 * 86400);
+        $DB->set_field('enrol', 'enrolenddate', $enrolenddate, ['id' => $manualenrol->id]);
+
+        $this->getDataGenerator()->enrol_user($user->id, $course->id, 'student');
+
+        $cache = \cache::make('block_enrolmenttimer', 'enrolmentdata');
+        $cache->purge();
+
+        $records = block_enrolmenttimer_get_enrolment_records($user->id, $course->id);
+        $record = reset($records);
+
+        // timeend should be 0, so it should fall back to enrolenddate.
+        $this->assertEquals(0, $record->timeend);
+        $result = block_enrolmenttimer_resolve_end_time($record);
+        $this->assertEquals($enrolenddate, $result);
+    }
+
+    /**
+     * Test resolve_end_time returns 0 when no end date.
+     */
+    public function test_resolve_end_time_no_end_date() {
+        global $DB;
+
+        $this->resetAfterTest(true);
+
+        $course = $this->getDataGenerator()->create_course();
+        $user = $this->getDataGenerator()->create_user();
+        $this->getDataGenerator()->enrol_user($user->id, $course->id, 'student');
+
+        $records = block_enrolmenttimer_get_enrolment_records($user->id, $course->id);
+        $record = reset($records);
+
+        $result = block_enrolmenttimer_resolve_end_time($record);
+        $this->assertEquals(0, $result);
+    }
+
+    /**
+     * Test get_stable_unit_keys returns 7 stable English keys.
+     */
+    public function test_stable_unit_keys() {
+        $keys = block_enrolmenttimer_get_stable_unit_keys();
+        $this->assertCount(7, $keys);
+        $this->assertEquals('years', $keys[0]);
+        $this->assertEquals('seconds', $keys[6]);
+    }
+
+    /**
+     * Test get_unit_key_map maps translated keys to stable keys.
+     */
+    public function test_unit_key_map() {
+        $map = block_enrolmenttimer_get_unit_key_map();
+        $this->assertCount(7, $map);
+
+        // In English, translated == stable.
+        $this->assertEquals('years', $map['years']);
+        $this->assertEquals('days', $map['days']);
+        $this->assertEquals('seconds', $map['seconds']);
+    }
+
+    /**
      * Test enrolment records cache is used on repeated calls.
      */
     public function test_enrolment_records_cache() {

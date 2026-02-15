@@ -46,18 +46,7 @@ function block_enrolmenttimer_get_remaining_enrolment_period($unitstoshow) {
         return false;
     }
 
-    // Determine the effective end time.
-    $endtime = 0;
-    if ($record->timeend != 0) {
-        $endtime = (int)$record->timeend;
-    } else {
-        // Check enrol method end date (any type, not just self-enrolment).
-        $enrol = $DB->get_record('enrol', ['id' => $record->enrolid], 'enrolenddate');
-        if ($enrol && !empty($enrol->enrolenddate) && (int)$enrol->enrolenddate > 0) {
-            $endtime = (int)$enrol->enrolenddate;
-        }
-    }
-
+    $endtime = block_enrolmenttimer_resolve_end_time($record);
     if ($endtime <= 0) {
         return false;
     }
@@ -150,7 +139,16 @@ function block_enrolmenttimer_get_enrolment_records($userid, $courseid) {
 }
 
 /**
+ * Return stable (untranslated) unit keys in order.
+ * @return string[]
+ */
+function block_enrolmenttimer_get_stable_unit_keys() {
+    return ['years', 'months', 'weeks', 'days', 'hours', 'minutes', 'seconds'];
+}
+
+/**
  * Return the values for different time periods.
+ * Keys are translated strings for display.
  * @return array
  */
 function block_enrolmenttimer_get_units() {
@@ -163,6 +161,43 @@ function block_enrolmenttimer_get_units() {
         get_string('key_minutes', 'block_enrolmenttimer') => 60,
         get_string('key_seconds', 'block_enrolmenttimer') => 1,
     ];
+}
+
+/**
+ * Return a mapping from translated unit label to stable English key.
+ * @return array ['días' => 'days', 'horas' => 'hours', ...]
+ */
+function block_enrolmenttimer_get_unit_key_map() {
+    $stablekeys = block_enrolmenttimer_get_stable_unit_keys();
+    $units = block_enrolmenttimer_get_units();
+    $translatedkeys = array_keys($units);
+    $map = [];
+    foreach ($translatedkeys as $i => $translated) {
+        $map[$translated] = $stablekeys[$i];
+    }
+    return $map;
+}
+
+/**
+ * Resolve the effective end time for a user_enrolments record.
+ * Checks user_enrolments.timeend first, falls back to enrol.enrolenddate.
+ *
+ * @param stdClass $uerecord A user_enrolments record with at least id, timeend, enrolid.
+ * @return int The effective end timestamp, or 0 if none set.
+ */
+function block_enrolmenttimer_resolve_end_time($uerecord) {
+    global $DB;
+
+    if (!empty($uerecord->timeend) && (int)$uerecord->timeend > 0) {
+        return (int)$uerecord->timeend;
+    }
+
+    $enrol = $DB->get_record('enrol', ['id' => $uerecord->enrolid], 'enrolenddate');
+    if ($enrol && !empty($enrol->enrolenddate) && (int)$enrol->enrolenddate > 0) {
+        return (int)$enrol->enrolenddate;
+    }
+
+    return 0;
 }
 
 /**
@@ -216,16 +251,7 @@ function block_enrolmenttimer_get_enrolment_info() {
         return false;
     }
 
-    $endtime = 0;
-    if ($record->timeend != 0) {
-        $endtime = (int)$record->timeend;
-    } else {
-        $enrol = $DB->get_record('enrol', ['id' => $record->enrolid], 'enrolenddate');
-        if ($enrol && !empty($enrol->enrolenddate) && (int)$enrol->enrolenddate > 0) {
-            $endtime = (int)$enrol->enrolenddate;
-        }
-    }
-
+    $endtime = block_enrolmenttimer_resolve_end_time($record);
     if ($endtime <= 0) {
         return false;
     }

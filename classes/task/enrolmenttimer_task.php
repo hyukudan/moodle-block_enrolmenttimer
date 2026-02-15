@@ -26,6 +26,14 @@ namespace block_enrolmenttimer\task;
 
 defined('MOODLE_INTERNAL') || die();
 
+/** @var string Fields to select from the user table in get_enrolled_users. */
+define('BLOCK_ENROLMENTTIMER_USER_FIELDS',
+    'u.id, u.username, u.auth, u.confirmed, u.email, u.firstname, u.lastname, ' .
+    'u.mailformat, u.maildisplay, u.emailstop, u.deleted, u.suspended, ' .
+    'u.lang, u.timezone, u.mnethostid, u.firstnamephonetic, u.lastnamephonetic, ' .
+    'u.middlename, u.alternatename, u.imagealt, u.picture'
+);
+
 /**
  * Class enrolmenttimer_task
  *
@@ -53,6 +61,9 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
         mtrace('block/enrolmenttimer - Cron is beginning');
         require_once($CFG->dirroot . '/blocks/enrolmenttimer/locallib.php');
 
+        // Purge orphaned alert records whose enrolment no longer exists.
+        $this->cleanup_orphaned_alerts();
+
         $alertenabled = get_config('enrolmenttimer', 'timeleftmessagechk');
         $completionenabled = get_config('enrolmenttimer', 'completionsmessagechk');
 
@@ -77,8 +88,9 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
             }
         }
 
-        // Get all instances of the block.
+        // Collect unique course IDs from all block instances to avoid processing duplicates.
         $instances = $DB->get_records('block_instances', ['blockname' => 'enrolmenttimer']);
+        $courseids = [];
 
         foreach ($instances as $instance) {
             $block = block_instance('enrolmenttimer', $instance);
@@ -92,7 +104,10 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
                 continue;
             }
 
-            $courseid = $blockcontext->instanceid;
+            $courseids[$blockcontext->instanceid] = true;
+        }
+
+        foreach (array_keys($courseids) as $courseid) {
             $course = $DB->get_record('course', ['id' => $courseid]);
             if (!$course || !$course->visible) {
                 continue;
@@ -103,9 +118,14 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
                 continue;
             }
 
-            $users = get_enrolled_users($coursecontext, '', 0, 'u.*');
+            // Select only needed fields; exclude deleted and suspended users.
+            $users = get_enrolled_users($coursecontext, '', 0, BLOCK_ENROLMENTTIMER_USER_FIELDS);
 
             foreach ($users as $user) {
+                if (!empty($user->deleted) || !empty($user->suspended)) {
+                    continue;
+                }
+
                 try {
                     if ($alertenabled) {
                         $this->process_expiry_alert($user, $course);
@@ -149,21 +169,7 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
         $daystoalert = (int)$daystoalert;
 
         foreach ($records as $record) {
-            // Already tracked.
-            if ($DB->record_exists('block_enrolmenttimer', ['enrolid' => $record->id])) {
-                continue;
-            }
-
-            $endtime = 0;
-            if ($record->timeend != 0) {
-                $endtime = (int)$record->timeend;
-            } else {
-                // Check enrol method end date (any enrolment type).
-                $enrol = $DB->get_record('enrol', ['id' => $record->enrolid], 'enrolenddate');
-                if ($enrol && !empty($enrol->enrolenddate) && (int)$enrol->enrolenddate > 0) {
-                    $endtime = (int)$enrol->enrolenddate;
-                }
-            }
+            $endtime = block_enrolmenttimer_resolve_end_time($record);
 
             if ($endtime <= 0) {
                 continue;
@@ -177,6 +183,9 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
                 $object->alerttime = $alerttime;
                 $object->sent = 0;
                 $DB->insert_record('block_enrolmenttimer', $object);
+            } catch (\dml_write_exception $e) {
+                // UNIQUE index violation means alert already exists — safe to ignore.
+                continue;
             } catch (\dml_exception $e) {
                 mtrace("WARNING: could not insert alert for enrolment {$record->id}: " . $e->getMessage());
             }
@@ -185,11 +194,6 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
 
     /**
      * Send completion email if the user meets the completion percentage threshold.
-     *
-     * Checks both course completion status and grade percentage against the
-     * configured threshold. If completionpercentage is 100, only course
-     * completion is required. Below 100, the user's course grade must meet
-     * or exceed the threshold.
      *
      * @param \stdClass $user
      * @param \stdClass $course
@@ -209,6 +213,14 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
         }
         $threshold = (float)$threshold;
 
+        // Pre-fetch grade once — reused for both threshold check and placeholder.
+        $gradeobj = null;
+        $pct = 100;
+        if ($threshold < 100) {
+            require_once($CFG->libdir . '/gradelib.php');
+            $gradeobj = grade_get_course_grade($user->id, $course->id);
+        }
+
         if ($threshold >= 100) {
             // Standard mode: require full course completion.
             $completion = $DB->get_record('course_completions', [
@@ -225,9 +237,6 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
             }
         } else {
             // Percentage mode: check grade against threshold.
-            require_once($CFG->libdir . '/gradelib.php');
-            $gradeobj = grade_get_course_grade($user->id, $course->id);
-
             if (!$gradeobj || !isset($gradeobj->grade) || $gradeobj->grade === null || $gradeobj->grade === '') {
                 return;
             }
@@ -238,14 +247,13 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
 
             $grademax = (isset($gradeobj->item) && $gradeobj->item->grademax > 0)
                 ? (float)$gradeobj->item->grademax : 100.0;
-            $percentage = ((float)$gradeobj->grade / $grademax) * 100;
+            $pct = round(((float)$gradeobj->grade / $grademax) * 100, 1);
 
-            if ($percentage < $threshold) {
+            if ($pct < $threshold) {
                 return;
             }
         }
 
-        $from = \core_user::get_support_user();
         $subject = get_config('enrolmenttimer', 'completionemailsubject');
         $body = get_config('enrolmenttimer', 'completionsmessage');
 
@@ -253,14 +261,15 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
             return;
         }
 
-        // Calculate actual percentage for the placeholder.
-        require_once($CFG->libdir . '/gradelib.php');
-        $gradeobj = grade_get_course_grade($user->id, $course->id);
-        $pct = 100;
-        if ($gradeobj && isset($gradeobj->grade) && $gradeobj->grade !== null) {
-            $grademax = (isset($gradeobj->item) && $gradeobj->item->grademax > 0)
-                ? (float)$gradeobj->item->grademax : 100.0;
-            $pct = round(((float)$gradeobj->grade / $grademax) * 100, 1);
+        // Compute percentage for placeholder if not already calculated.
+        if ($threshold >= 100 && $gradeobj === null) {
+            require_once($CFG->libdir . '/gradelib.php');
+            $gradeobj = grade_get_course_grade($user->id, $course->id);
+            if ($gradeobj && isset($gradeobj->grade) && $gradeobj->grade !== null) {
+                $grademax = (isset($gradeobj->item) && $gradeobj->item->grademax > 0)
+                    ? (float)$gradeobj->item->grademax : 100.0;
+                $pct = round(((float)$gradeobj->grade / $grademax) * 100, 1);
+            }
         }
 
         $body = $this->replace_placeholders($body, $user, $course);
@@ -271,8 +280,15 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
         if ($messageid) {
             set_user_preference($prefkey, time(), $user->id);
             mtrace("- completion email sent to user {$user->id} for course {$course->id} (grade: {$pct}%)");
+
+            $event = \block_enrolmenttimer\event\completion_email_sent::create([
+                'context' => \context_course::instance($course->id),
+                'courseid' => $course->id,
+                'relateduserid' => $user->id,
+            ]);
+            $event->trigger();
         } else {
-            mtrace("ERROR: failed to send completion email to user {$user->id} (email: {$user->email}) for course {$course->id}");
+            mtrace("ERROR: failed to send completion email to user {$user->id} for course {$course->id}");
         }
     }
 
@@ -317,6 +333,13 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
                 continue;
             }
 
+            // Skip deleted or suspended users.
+            if (!empty($user->deleted) || !empty($user->suspended)) {
+                $alert->sent = 1;
+                $DB->update_record('block_enrolmenttimer', $alert);
+                continue;
+            }
+
             $course = $DB->get_record('course', ['id' => $enrol->courseid]);
             if (!$course) {
                 $alert->sent = 1;
@@ -346,15 +369,42 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
             if ($messageid) {
                 $alert->sent = 1;
                 mtrace("- expiry alert sent to user {$user->id} for course {$course->id}");
+
+                $event = \block_enrolmenttimer\event\alert_sent::create([
+                    'context' => \context_course::instance($course->id),
+                    'courseid' => $course->id,
+                    'relateduserid' => $user->id,
+                ]);
+                $event->trigger();
             } else {
-                mtrace("ERROR: failed to send expiry alert to user {$user->id} (email: {$user->email}) for course {$course->id}");
+                mtrace("ERROR: failed to send expiry alert to user {$user->id} for course {$course->id}");
             }
             $DB->update_record('block_enrolmenttimer', $alert);
         }
     }
 
     /**
+     * Delete alert records whose enrolment no longer exists in user_enrolments.
+     */
+    private function cleanup_orphaned_alerts() {
+        global $DB;
+
+        $sql = "SELECT bt.id
+                  FROM {block_enrolmenttimer} bt
+             LEFT JOIN {user_enrolments} ue ON ue.id = bt.enrolid
+                 WHERE ue.id IS NULL";
+        $orphans = $DB->get_fieldset_sql($sql);
+
+        if (!empty($orphans)) {
+            list($insql, $params) = $DB->get_in_or_equal($orphans);
+            $DB->delete_records_select('block_enrolmenttimer', "id $insql", $params);
+            mtrace('- purged ' . count($orphans) . ' orphaned alert record(s)');
+        }
+    }
+
+    /**
      * Replace common placeholders in an email body.
+     * Values are escaped for safe HTML insertion.
      *
      * @param string $body The template body.
      * @param \stdClass $user The user object.
@@ -375,10 +425,10 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
                 '[[site_name]]',
             ],
             [
-                fullname($user),
-                $user->firstname,
-                $course->fullname,
-                $course->shortname,
+                s(fullname($user)),
+                s($user->firstname),
+                format_string($course->fullname),
+                format_string($course->shortname),
                 $courseurl->out(false),
                 format_string($site->fullname),
             ],
@@ -410,7 +460,7 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
         $message->notification = 1;
         $message->courseid = $course->id;
         $message->contexturl = new \moodle_url('/course/view.php', ['id' => $course->id]);
-        $message->contexturlname = $course->fullname;
+        $message->contexturlname = format_string($course->fullname);
 
         try {
             return message_send($message);

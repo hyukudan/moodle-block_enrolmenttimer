@@ -70,5 +70,39 @@ function xmldb_block_enrolmenttimer_upgrade($oldversion) {
         upgrade_block_savepoint(true, 2026021500, 'enrolmenttimer');
     }
 
+    if ($oldversion < 2026021502) {
+        $table = new xmldb_table('block_enrolmenttimer');
+
+        // Remove old non-unique index on enrolid if it exists.
+        $oldindex = new xmldb_index('enrolid_idx', XMLDB_INDEX_NOTUNIQUE, ['enrolid']);
+        if ($dbman->index_exists($table, $oldindex)) {
+            $dbman->drop_index($table, $oldindex);
+        }
+
+        // Remove any duplicate enrolid rows before adding UNIQUE constraint.
+        $duplicates = $DB->get_records_sql(
+            "SELECT enrolid FROM {block_enrolmenttimer} GROUP BY enrolid HAVING COUNT(*) > 1"
+        );
+        foreach ($duplicates as $dup) {
+            $records = $DB->get_records('block_enrolmenttimer', ['enrolid' => $dup->enrolid], 'id ASC');
+            $first = true;
+            foreach ($records as $rec) {
+                if ($first) {
+                    $first = false;
+                    continue;
+                }
+                $DB->delete_records('block_enrolmenttimer', ['id' => $rec->id]);
+            }
+        }
+
+        // Add UNIQUE index on enrolid to prevent race condition duplicates.
+        $newindex = new xmldb_index('enrolid_uq', XMLDB_INDEX_UNIQUE, ['enrolid']);
+        if (!$dbman->index_exists($table, $newindex)) {
+            $dbman->add_index($table, $newindex);
+        }
+
+        upgrade_block_savepoint(true, 2026021502, 'enrolmenttimer');
+    }
+
     return true;
 }

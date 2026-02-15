@@ -15,7 +15,7 @@
         <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
       </KEYS>
       <INDEXES>
-        <INDEX NAME="enrolid_idx" UNIQUE="false" FIELDS="enrolid"/>
+        <INDEX NAME="enrolid_uq" UNIQUE="true" FIELDS="enrolid"/>
         <INDEX NAME="sent_alerttime_idx" UNIQUE="false" FIELDS="sent, alerttime"/>
       </INDEXES>
     </TABLE>

@@ -279,8 +279,8 @@ class task_test extends advanced_testcase {
 
         $sink->close();
 
-        $alert = $DB->get_record('block_enrolmenttimer', ['id' => $alertid]);
-        $this->assertEquals(1, $alert->sent);
+        // cleanup_orphaned_alerts deletes records whose enrolment no longer exists.
+        $this->assertFalse($DB->record_exists('block_enrolmenttimer', ['id' => $alertid]));
     }
 
     /**
@@ -492,5 +492,216 @@ class task_test extends advanced_testcase {
         $result = $this->execute_task($task);
 
         $this->assertTrue($result);
+    }
+
+    /**
+     * Test UNIQUE index prevents duplicate alerts (race condition protection).
+     */
+    public function test_unique_index_prevents_duplicate_alert() {
+        global $DB;
+
+        $this->resetAfterTest(true);
+
+        $course = $this->create_course_with_block();
+        $user = $this->getDataGenerator()->create_user();
+
+        $manualenrol = $DB->get_record('enrol', ['courseid' => $course->id, 'enrol' => 'manual']);
+        $manualplugin = enrol_get_plugin('manual');
+        $end = time() + (15 * 86400);
+        $manualplugin->enrol_user($manualenrol, $user->id, null, time(), $end);
+
+        $ue = $DB->get_record('user_enrolments', [
+            'userid' => $user->id,
+            'enrolid' => $manualenrol->id,
+        ]);
+
+        // Pre-insert an alert record (simulating a concurrent process).
+        $DB->insert_record('block_enrolmenttimer', (object)[
+            'enrolid' => $ue->id,
+            'alerttime' => $end - (10 * 86400),
+            'sent' => 0,
+        ]);
+
+        set_config('timeleftmessagechk', 1, 'enrolmenttimer');
+        set_config('daystoalertenrolmentend', 10, 'enrolmenttimer');
+        set_config('enrolmentemailsubject', 'Test', 'enrolmenttimer');
+        set_config('timeleftmessage', 'Test', 'enrolmenttimer');
+        set_config('completionsmessagechk', 0, 'enrolmenttimer');
+
+        // Task should handle the duplicate gracefully.
+        $task = new enrolmenttimer_task();
+        $result = $this->execute_task($task);
+
+        $this->assertTrue($result);
+        $count = $DB->count_records('block_enrolmenttimer', ['enrolid' => $ue->id]);
+        $this->assertEquals(1, $count);
+    }
+
+    /**
+     * Test that suspended users are skipped during task processing.
+     */
+    public function test_suspended_users_skipped() {
+        global $DB;
+
+        $this->resetAfterTest(true);
+        $this->preventResetByRollback();
+
+        $course = $this->create_course_with_block();
+        $user = $this->getDataGenerator()->create_user(['suspended' => 1]);
+
+        $manualenrol = $DB->get_record('enrol', ['courseid' => $course->id, 'enrol' => 'manual']);
+        $manualplugin = enrol_get_plugin('manual');
+        $end = time() + (15 * 86400);
+        $manualplugin->enrol_user($manualenrol, $user->id, null, time(), $end);
+
+        set_config('timeleftmessagechk', 1, 'enrolmenttimer');
+        set_config('daystoalertenrolmentend', 10, 'enrolmenttimer');
+        set_config('enrolmentemailsubject', 'Test', 'enrolmenttimer');
+        set_config('timeleftmessage', 'Test body', 'enrolmenttimer');
+        set_config('completionsmessagechk', 0, 'enrolmenttimer');
+
+        $task = new enrolmenttimer_task();
+        $this->execute_task($task);
+
+        // Suspended user should not have an alert record created.
+        $this->assertEquals(0, $DB->count_records('block_enrolmenttimer'));
+    }
+
+    /**
+     * Test that suspended users don't receive pending alerts.
+     */
+    public function test_suspended_users_no_pending_alerts() {
+        global $DB;
+
+        $this->resetAfterTest(true);
+        $this->preventResetByRollback();
+
+        $course = $this->create_course_with_block();
+        $user = $this->getDataGenerator()->create_user();
+
+        $manualenrol = $DB->get_record('enrol', ['courseid' => $course->id, 'enrol' => 'manual']);
+        $manualplugin = enrol_get_plugin('manual');
+        $end = time() + (2 * 86400);
+        $manualplugin->enrol_user($manualenrol, $user->id, null, time(), $end);
+
+        $ue = $DB->get_record('user_enrolments', [
+            'userid' => $user->id,
+            'enrolid' => $manualenrol->id,
+        ]);
+
+        // Create alert record, then suspend user.
+        $DB->insert_record('block_enrolmenttimer', (object)[
+            'enrolid' => $ue->id,
+            'alerttime' => time() - 3600,
+            'sent' => 0,
+        ]);
+        $DB->set_field('user', 'suspended', 1, ['id' => $user->id]);
+
+        set_config('timeleftmessagechk', 1, 'enrolmenttimer');
+        set_config('enrolmentemailsubject', 'Test', 'enrolmenttimer');
+        set_config('timeleftmessage', 'Test', 'enrolmenttimer');
+        set_config('completionsmessagechk', 0, 'enrolmenttimer');
+
+        $sink = $this->redirectMessages();
+        $task = new enrolmenttimer_task();
+        $this->execute_task($task);
+        $messages = $sink->get_messages();
+        $sink->close();
+
+        // No messages should be sent to suspended user.
+        $this->assertCount(0, $messages);
+
+        // Alert should be marked as sent (skipped).
+        $alert = $DB->get_record('block_enrolmenttimer', ['enrolid' => $ue->id]);
+        $this->assertEquals(1, $alert->sent);
+    }
+
+    /**
+     * Test that email body does not contain PII (no user email in mtrace).
+     */
+    public function test_mtrace_no_email_pii() {
+        global $DB;
+
+        $this->resetAfterTest(true);
+        $this->preventResetByRollback();
+
+        $course = $this->create_course_with_block();
+        $user = $this->getDataGenerator()->create_user([
+            'email' => 'sensitivetest@example.com',
+        ]);
+        $this->getDataGenerator()->enrol_user($user->id, $course->id, 'student');
+
+        $DB->insert_record('course_completions', (object)[
+            'userid' => $user->id,
+            'course' => $course->id,
+            'timecompleted' => time(),
+            'timestarted' => time() - 86400,
+        ]);
+
+        set_config('timeleftmessagechk', 0, 'enrolmenttimer');
+        set_config('completionsmessagechk', 1, 'enrolmenttimer');
+        set_config('completionpercentage', 100, 'enrolmenttimer');
+        set_config('completionemailsubject', 'Congrats', 'enrolmenttimer');
+        set_config('completionsmessage', 'Done', 'enrolmenttimer');
+
+        $sink = $this->redirectMessages();
+
+        $task = new enrolmenttimer_task();
+        ob_start();
+        $task->execute();
+        $output = ob_get_clean();
+        $sink->close();
+
+        // Verify mtrace output does not contain the user's email.
+        $this->assertStringNotContainsString('sensitivetest@example.com', $output);
+    }
+
+    /**
+     * Test event is triggered when alert is sent.
+     */
+    public function test_alert_sent_event_triggered() {
+        global $DB;
+
+        $this->resetAfterTest(true);
+        $this->preventResetByRollback();
+
+        $course = $this->create_course_with_block();
+        $user = $this->getDataGenerator()->create_user();
+
+        $manualenrol = $DB->get_record('enrol', ['courseid' => $course->id, 'enrol' => 'manual']);
+        $manualplugin = enrol_get_plugin('manual');
+        $end = time() + (2 * 86400);
+        $manualplugin->enrol_user($manualenrol, $user->id, null, time(), $end);
+
+        $ue = $DB->get_record('user_enrolments', [
+            'userid' => $user->id,
+            'enrolid' => $manualenrol->id,
+        ]);
+
+        $DB->insert_record('block_enrolmenttimer', (object)[
+            'enrolid' => $ue->id,
+            'alerttime' => time() - 3600,
+            'sent' => 0,
+        ]);
+
+        set_config('timeleftmessagechk', 1, 'enrolmenttimer');
+        set_config('enrolmentemailsubject', 'Test', 'enrolmenttimer');
+        set_config('timeleftmessage', 'Test [[user_name]]', 'enrolmenttimer');
+        set_config('completionsmessagechk', 0, 'enrolmenttimer');
+
+        $sink = $this->redirectMessages();
+        $eventsink = $this->redirectEvents();
+
+        $task = new enrolmenttimer_task();
+        $this->execute_task($task);
+
+        $sink->close();
+        $events = $eventsink->get_events();
+        $eventsink->close();
+
+        $alertevents = array_filter($events, function($e) {
+            return $e instanceof \block_enrolmenttimer\event\alert_sent;
+        });
+        $this->assertNotEmpty($alertevents);
     }
 }

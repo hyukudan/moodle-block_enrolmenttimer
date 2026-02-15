@@ -1,117 +1,54 @@
-# Enrolment Timer Block for Moodle
+moodle-enrolmenttimer
+=====================
+[![Build Status](https://travis-ci.org/learningworks/moodle-block_enrolmenttimer.svg?branch=master)](https://travis-ci.org/learningworks/moodle-block_enrolmenttimer)
 
-**Fork of [learningworks/moodle-block_enrolmenttimer](https://github.com/learningworks/moodle-block_enrolmenttimer)**
+Moodle Block - enrolmenttimer
+Developed by - Aaron Leggett - LearningWorks Ltd
+Maintained by - LearningWorks Ltd
 
-Moodle block that displays a countdown timer showing remaining enrolment time, with visual progress indicators, urgency alerts, and configurable email notifications.
+This block provides the functionality to display the time a user has left in their enrolment period.
+There are many settings to choose from to customise the way this is displayed to the user.
+A notification can be sent on a set period before the enrolment expires advising the user that their enrolment is coming to an end.
+Another email notification can be sent once the user has received a set score in the course_total score.
 
-## Features
+The plugin has been developed with limited styling to enable the best possible base for theme overrides to align the design with your existing moodle theme.
 
-- Visual countdown timer with configurable time units (years, months, weeks, days, hours, minutes, seconds)
-- Active JavaScript countdown with automatic stop at zero
-- Progress bar showing percentage of enrolment time elapsed (color-coded: green/yellow/red)
-- Urgency alerts when enrolment expires within 7 days (Bootstrap alert banners)
-- Optional exact expiry date display
-- Enrolment expiry email alerts (configurable days before)
-- Course completion email notification with grade percentage threshold
-- Moodle Message API integration (popup + email, user-configurable)
-- Dashboard widget support
-- WCAG accessibility (ARIA labels, reduced motion support)
-- Responsive design for mobile
-- Full GDPR/Privacy API implementation
-- Request-level database caching
 
-## Requirements
+VERSION UPDATES
+===============
+Version 2019091800
+- Update JS to use AMD format
+- Implement Privacy API
+- TravisCI file updated
+- Supporting docs & comments updated, upgrade file fixed
 
-- Moodle 4.5+ (version 2024100700 or later)
-- PHP 8.1+
+Version 2017083000
+- Modify the alerttime notification so it is now stored in a log that is then processed
+- Add in support for self-enrolment enrolment types. Done by looking at the current instance if no end time set check if 
+the instance is a self enrolment and get the end date if set
 
-## Settings
+Version 2017060900
+- Change the define() to require() to prevent mismatch error
 
-### General
-| Setting | Description | Default |
-|---|---|---|
-| Hide block (No End Date) | Hide block for users without end date | Enabled |
-| Display Unit Labels | Show unit names below counters | Disabled |
-| Force 2 Digits | Pad single digits with zero | Enabled |
-| Display Text Counter | Show text version below visual counter | Enabled |
-| Active Countdown | JavaScript live countdown | Enabled |
-| Show Progress Bar | Visual progress bar of time elapsed | Disabled |
-| Show Expiry Date | Display exact expiry date/time | Disabled |
-| Increments Shown | Which time units to display | All |
+Version 2016122101
+- Compliance with Moodle Travis CI, Moved from cron to Scheduled task, Tested against moodle 2.9, 3.0, 3.1.3+, 3.2
 
-### Alert Emails
-| Setting | Description | Default |
-|---|---|---|
-| Enable Time Warning | Send alert before expiry | Disabled |
-| Days to alert | Days before expiry to send alert | 10 |
-| Email Subject | Alert email subject | "Enrolment Expiring" |
-| Message Template | HTML template with placeholders | Empty |
+Version 2016060800
+- Updated locallib to remove the dependency on CFG->prefix and update the version file. Checked against Moodle 3.0.4 & 3.1
 
-### Completion Emails
-| Setting | Description | Default |
-|---|---|---|
-| Enable Completion Email | Send email on completion | Disabled |
-| Notification Percentage | Minimum grade % to trigger | 100 |
-| Email Subject | Completion email subject | "Course Completed" |
-| Message Template | HTML template with placeholders | Empty |
+Version 2015031914
+- Updated SQL query to use Moodle's table prefix setting instead of expecting it to be 'mdl_'
 
-### Email Placeholders
+Version 2015020200
+- Updated background image URL's and checked 2.8 functionlaity
 
-**Alert emails:** `[[user_name]]` `[[user_firstname]]` `[[course_name]]` `[[course_shortname]]` `[[days_to_alert]]` `[[days_remaining]]` `[[expiry_date]]` `[[course_url]]` `[[site_name]]`
+Version 2014061205
+- Fixed up the functionality so the actual text value of each incremental
+value is only set in one place. Code is more streamlined in this file
+also.
 
-**Completion emails:** `[[user_name]]` `[[user_firstname]]` `[[course_name]]` `[[course_shortname]]` `[[course_url]]` `[[site_name]]` `[[percentage]]`
+- As per the request of 'German Valero', I have added the remaining
+strings to the langfile for easy AMOS language conversion
 
-## Changes from original (v5.2.0)
-
-### Security
-- Fixed SQL injection in scheduled task (parameterized queries)
-- Added XSS escaping in block HTML output with `s()`
-- Removed dangerous `require_once config.php` from scheduled task
-
-### Bug Fixes
-- Replaced hardcoded role ID 5 with `get_enrolled_users()`
-- Fixed multiple enrolments bug (records keyed by userid caused data loss)
-- Removed hardcoded `'enrol' => 'self'` filter (all enrolment types now supported)
-- Fixed invalid `hour = 24` in task schedule
-- Fixed `get_minute()` logic crash (undefined array index)
-- Fixed boolean in SQL integer column (`sent = false` -> `sent = 0`)
-- Fixed `> $unit` to `>= $unit` (exact unit match edge case)
-- Fixed negative/zero time handling (expired enrolments)
-- Fixed array bounds crash in `sort_units_to_show()`
-- Fixed grade 0 vs null distinction in completion percentage
-- Fixed `forceTwoDigits` checked after timer start in JavaScript
-
-### Moodle 5.1+ Compatibility
-- Declared dynamic class properties (PHP 8.2+)
-- Full Privacy API (GDPR) with export/delete of user preferences
-- Added `myaddinstance` capability
-- ESLint-compliant AMD JavaScript with JSDoc
-- Moodle Message API for notifications (replaces `email_to_user`)
-
-### New Features
-- Progress bar showing % of enrolment time elapsed
-- Urgency alerts (warning at 7 days, danger at 3 days)
-- Optional exact expiry date display
-- Completion email triggered by grade percentage threshold
-- Additional email placeholders (firstname, course URL, site name, etc.)
-- Message providers: users can control notification preferences
-- Dashboard widget support
-- Request-level database caching
-
-### Performance
-- Database indexes on `enrolid` and `sent + alerttime`
-- Per-request cache for enrolment data queries
-- Orphaned alert records cleaned up automatically
-
-### Accessibility
-- ARIA labels on timer elements
-- Responsive CSS with mobile breakpoints
-- `prefers-reduced-motion` support
-
-## Installation
-
-Copy the plugin to `blocks/enrolmenttimer` in your Moodle installation and run the upgrade.
-
-## License
-
-GPL v3 or later - http://www.gnu.org/copyleft/gpl.html
+Version 2014061101
+- Function Names have been updated to align with the Moodle frankenstyle naming convention

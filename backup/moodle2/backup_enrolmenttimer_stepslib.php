@@ -15,16 +15,13 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * Version File
+ * Backup steps for block_enrolmenttimer.
  *
  * @package    block_enrolmenttimer
- * @copyright  LearningWorks Ltd 2016
+ * @copyright  2026 block_enrolmenttimer contributors
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
 defined('MOODLE_INTERNAL') || die();
-$plugin->version   = 2026021502;
-$plugin->requires  = 2024100700; // Moodle 4.5+.
-$plugin->component = 'block_enrolmenttimer';
-$plugin->maturity  = MATURITY_STABLE;
-$plugin->release   = '5.3.0';
+
+// No custom backup steps needed — block_instances.configdata is backed up automatically.

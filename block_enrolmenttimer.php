@@ -75,7 +75,11 @@ class block_enrolmenttimer extends block_base {
      * Tell Moodle we have some specializations.
      */
     public function specialization() {
-        $this->title = get_string('enrolmenttimer', 'block_enrolmenttimer');
+        if (!empty($this->config->title)) {
+            $this->title = format_string($this->config->title);
+        } else {
+            $this->title = get_string('enrolmenttimer', 'block_enrolmenttimer');
+        }
         $this->completionpercentage = get_config('enrolmenttimer', 'completionpercentage');
         $this->activecountdown = get_config('enrolmenttimer', 'activecountdown');
         $this->viewoptions = get_config('enrolmenttimer', 'viewoptions');
@@ -126,9 +130,10 @@ class block_enrolmenttimer extends block_base {
             $force2digits = get_config('enrolmenttimer', 'forceTwoDigits');
             $displaylabels = get_config('enrolmenttimer', 'displayUnitLabels');
             $displaytextcounter = get_config('enrolmenttimer', 'displayTextCounter');
+            $unitkeymap = block_enrolmenttimer_get_unit_key_map();
 
             $this->content->text .= '<hr>';
-            $this->content->text .= '<div class="visual-counter">';
+            $this->content->text .= '<div class="visual-counter" aria-live="polite" aria-atomic="true">';
             $this->content->text .= '<div class="timer-wrapper" role="timer"' .
                 ' aria-label="' . s(get_string('expirytext', 'block_enrolmenttimer')) . '"';
             if ($force2digits == 1) {
@@ -138,6 +143,7 @@ class block_enrolmenttimer extends block_base {
 
             foreach ($timeleft as $unit => $count) {
                 $safeunit = s($unit);
+                $stablekey = isset($unitkeymap[$unit]) ? $unitkeymap[$unit] : $safeunit;
                 $stringcount = (string)(int)$count;
                 $countlength = strlen($stringcount);
 
@@ -145,7 +151,8 @@ class block_enrolmenttimer extends block_base {
                     $this->content->text .= '<div class="numberTypeWrapper">';
                 }
 
-                $this->content->text .= '<div class="timerNum" data-id="' . $safeunit . '">';
+                $this->content->text .= '<div class="timerNum" data-id="' . $safeunit .
+                    '" data-unit="' . $stablekey . '">';
 
                 if ($countlength == 1 && $force2digits == 1) {
                     $this->content->text .= '<span class="timerNumChar" data-id="0">0</span>';
@@ -167,7 +174,7 @@ class block_enrolmenttimer extends block_base {
                     $this->content->text .= '<div class="seperator">:</div>';
                 }
 
-                $text .= '<span class="' . $safeunit . '">' . (int)$count . '</span> ';
+                $text .= '<span data-unit="' . $stablekey . '">' . (int)$count . '</span> ';
                 if ($count > 1) {
                     $text .= $safeunit . ' ';
                 } else {
@@ -191,24 +198,44 @@ class block_enrolmenttimer extends block_base {
             // Urgency alert, progress bar, and exact expiry date.
             $enrolinfo = block_enrolmenttimer_get_enrolment_info();
             if ($enrolinfo) {
-                // Urgency alerts.
+                // Urgency alerts with configurable thresholds.
                 $daysrem = $enrolinfo['daysremaining'];
-                if ($daysrem <= 3 && $daysrem > 0) {
+                $dangerdays = (int)get_config('enrolmenttimer', 'urgency_danger_days');
+                $warningdays = (int)get_config('enrolmenttimer', 'urgency_warning_days');
+                if ($dangerdays <= 0) {
+                    $dangerdays = 3;
+                }
+                if ($warningdays <= 0) {
+                    $warningdays = 7;
+                }
+
+                if ($daysrem <= 0) {
+                    $this->content->text .= '<div class="alert alert-danger mt-2 p-2 small">' .
+                        get_string('expired', 'block_enrolmenttimer') . '</div>';
+                } else if ($daysrem <= $dangerdays) {
                     $this->content->text .= '<div class="alert alert-danger mt-2 p-2 small">' .
                         get_string('expiring_soon', 'block_enrolmenttimer') . '</div>';
-                } else if ($daysrem <= 7) {
+                } else if ($daysrem <= $warningdays) {
                     $this->content->text .= '<div class="alert alert-warning mt-2 p-2 small">' .
                         get_string('expiring_warning', 'block_enrolmenttimer') . '</div>';
                 }
 
-                // Progress bar.
+                // Progress bar with configurable color thresholds.
                 $showprogress = get_config('enrolmenttimer', 'showprogressbar');
                 if ($showprogress && $enrolinfo['progress'] > 0) {
-                    $pct = $enrolinfo['progress'];
+                    $pct = (int)round($enrolinfo['progress']);
+                    $progressdanger = (int)get_config('enrolmenttimer', 'progress_danger_pct');
+                    $progresswarning = (int)get_config('enrolmenttimer', 'progress_warning_pct');
+                    if ($progressdanger <= 0) {
+                        $progressdanger = 80;
+                    }
+                    if ($progresswarning <= 0) {
+                        $progresswarning = 50;
+                    }
                     $barclass = 'bg-success';
-                    if ($pct >= 80) {
+                    if ($pct >= $progressdanger) {
                         $barclass = 'bg-danger';
-                    } else if ($pct >= 50) {
+                    } else if ($pct >= $progresswarning) {
                         $barclass = 'bg-warning';
                     }
                     $arialabel = get_string('progress_elapsed', 'block_enrolmenttimer', $pct);
@@ -226,7 +253,7 @@ class block_enrolmenttimer extends block_base {
                 if ($showexpirydate && $enrolinfo['endtime'] > 0) {
                     $datestr = userdate($enrolinfo['endtime'], get_string('strftimedatetime', 'langconfig'));
                     $this->content->text .= '<p class="small text-muted mt-1 mb-0">' .
-                        get_string('expirydate', 'block_enrolmenttimer', $datestr) . '</p>';
+                        get_string('expirydate', 'block_enrolmenttimer', s($datestr)) . '</p>';
                 }
             }
         }
