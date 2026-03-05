@@ -299,7 +299,22 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
         global $DB;
 
         $time = time();
-        $sql = "SELECT * FROM {block_enrolmenttimer} WHERE sent = 0 AND alerttime < :time";
+        // Batch-load all needed data in a single JOIN query (avoids 4N+1 queries).
+        $sql = "SELECT bt.id as alertid, bt.enrolid, bt.alerttime,
+                       ue.id as ueid, ue.userid, ue.enrolid as ue_enrolid, ue.timeend,
+                       e.id as enrolid2, e.courseid, e.enrolenddate,
+                       u.id as uid, u.username, u.auth, u.confirmed, u.email,
+                       u.firstname, u.lastname, u.mailformat, u.maildisplay,
+                       u.emailstop, u.deleted, u.suspended, u.lang, u.timezone,
+                       u.mnethostid, u.firstnamephonetic, u.lastnamephonetic,
+                       u.middlename, u.alternatename, u.imagealt, u.picture,
+                       c.id as courseid2, c.fullname, c.shortname, c.visible
+                  FROM {block_enrolmenttimer} bt
+             LEFT JOIN {user_enrolments} ue ON ue.id = bt.enrolid
+             LEFT JOIN {enrol} e ON e.id = ue.enrolid
+             LEFT JOIN {user} u ON u.id = ue.userid
+             LEFT JOIN {course} c ON c.id = e.courseid
+                 WHERE bt.sent = 0 AND bt.alerttime < :time";
         $emailstosend = $DB->get_records_sql($sql, ['time' => $time]);
 
         if (empty($emailstosend)) {
@@ -315,37 +330,62 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
             return;
         }
 
-        foreach ($emailstosend as $alert) {
-            $enrolinstance = $DB->get_record('user_enrolments', ['id' => $alert->enrolid]);
-            if (!$enrolinstance) {
+        foreach ($emailstosend as $row) {
+            // Reconstruct alert object for update_record.
+            $alert = new \stdClass();
+            $alert->id = $row->alertid;
+            $alert->enrolid = $row->enrolid;
+            $alert->alerttime = $row->alerttime;
+            $alert->sent = 0;
+
+            if (empty($row->ueid)) {
                 mtrace("WARNING: orphaned alert record {$alert->id} (enrolid {$alert->enrolid} not found), marking handled");
                 $alert->sent = 1;
                 $DB->update_record('block_enrolmenttimer', $alert);
                 continue;
             }
 
-            $user = $DB->get_record('user', ['id' => $enrolinstance->userid]);
-            $enrol = $DB->get_record('enrol', ['id' => $enrolinstance->enrolid]);
-            if (!$user || !$enrol) {
+            if (empty($row->uid) || empty($row->enrolid2)) {
                 mtrace("WARNING: missing user or enrol for alert {$alert->id}, marking handled");
                 $alert->sent = 1;
                 $DB->update_record('block_enrolmenttimer', $alert);
                 continue;
             }
 
-            // Skip deleted or suspended users.
-            if (!empty($user->deleted) || !empty($user->suspended)) {
+            if (!empty($row->deleted) || !empty($row->suspended)) {
                 $alert->sent = 1;
                 $DB->update_record('block_enrolmenttimer', $alert);
                 continue;
             }
 
-            $course = $DB->get_record('course', ['id' => $enrol->courseid]);
-            if (!$course) {
+            if (empty($row->courseid2)) {
                 $alert->sent = 1;
                 $DB->update_record('block_enrolmenttimer', $alert);
                 continue;
             }
+
+            // Build user object from joined row.
+            $user = new \stdClass();
+            foreach (['username', 'auth', 'confirmed', 'email', 'firstname', 'lastname',
+                       'mailformat', 'maildisplay', 'emailstop', 'deleted', 'suspended',
+                       'lang', 'timezone', 'mnethostid', 'firstnamephonetic',
+                       'lastnamephonetic', 'middlename', 'alternatename', 'imagealt', 'picture'] as $f) {
+                $user->$f = $row->$f;
+            }
+            $user->id = $row->uid;
+
+            // Build course object from joined row.
+            $course = new \stdClass();
+            $course->id = $row->courseid2;
+            $course->fullname = $row->fullname;
+            $course->shortname = $row->shortname;
+            $course->visible = $row->visible;
+
+            // Build enrolment data for time calculations.
+            $enrolinstance = new \stdClass();
+            $enrolinstance->timeend = $row->timeend;
+            $enrol = new \stdClass();
+            $enrol->enrolenddate = $row->enrolenddate;
 
             $body = $bodytemplate;
             $body = $this->replace_placeholders($body, $user, $course);
@@ -353,9 +393,9 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
                 get_config('enrolmenttimer', 'daystoalertenrolmentend'), $body);
 
             // Calculate days remaining for this specific enrolment.
-            $endtime = $enrolinstance->timeend;
+            $endtime = $enrolinstance->timeend ?? 0;
             if ($endtime == 0 && !empty($enrol->enrolenddate)) {
-                $endtime = $enrol->enrolenddate;
+                $endtime = (int) $enrol->enrolenddate;
             }
             $daysrem = ($endtime > 0) ? max(0, (int)ceil(($endtime - time()) / 86400)) : 0;
             $body = str_replace('[[days_remaining]]', (string)$daysrem, $body);

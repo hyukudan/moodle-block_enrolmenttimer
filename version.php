@@ -23,8 +23,8 @@
  */
 
 defined('MOODLE_INTERNAL') || die();
-$plugin->version   = 2026021502;
+$plugin->version   = 2026030500;
 $plugin->requires  = 2024100700; // Moodle 4.5+.
 $plugin->component = 'block_enrolmenttimer';
 $plugin->maturity  = MATURITY_STABLE;
-$plugin->release   = '5.3.0';
+$plugin->release   = '5.3.1';
