@@ -190,4 +190,13 @@ if ($ADMIN->fulltree) {
         get_string('completionsmessage_help', 'block_enrolmenttimer'),
         ''
     ));
+
+    // SMTP burst protection. See classes/task/enrolmenttimer_task.php execute().
+    $settings->add(new admin_setting_configtext(
+        'enrolmenttimer/pacing_usec',
+        get_string('pacing_usec', 'block_enrolmenttimer'),
+        get_string('pacing_usec_desc', 'block_enrolmenttimer'),
+        '1500000',
+        PARAM_INT
+    ));
 }

@@ -107,3 +107,5 @@ $string['privacy:metadata:enrolid'] = 'The ID of the user enrolment record this 
 $string['privacy:metadata:alerttime'] = 'The timestamp at which the alert email should be sent.';
 $string['privacy:metadata:sent'] = 'Whether the alert email has been sent.';
 $string['privacy:metadata:completion_preference'] = 'Timestamp when the course completion email was sent to the user.';
+$string['pacing_usec'] = 'Microseconds between deliveries';
+$string['pacing_usec_desc'] = 'Pause inserted between each email sent by the cron task. 1500000 = 1.5 seconds (recommended). Set to 0 to disable. Prevents sub-second SMTP bursts that have historically triggered Microsoft S3115/S3140 blocklists.';

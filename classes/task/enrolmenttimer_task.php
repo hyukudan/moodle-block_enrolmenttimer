@@ -67,6 +67,11 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
         $alertenabled = get_config('enrolmenttimer', 'timeleftmessagechk');
         $completionenabled = get_config('enrolmenttimer', 'completionsmessagechk');
 
+        // Pause between SMTP deliveries to avoid sub-second bursts that historically
+        // triggered Microsoft S3115/S3140 blocklists. 0 disables; default 1.5s.
+        $pacingraw = get_config('enrolmenttimer', 'pacing_usec');
+        $pacingusec = ($pacingraw === false) ? 1500000 : (int)$pacingraw;
+
         if (!$alertenabled && !$completionenabled) {
             mtrace('- no mail features enabled');
             return true;
@@ -121,7 +126,9 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
             // Select only needed fields; exclude deleted and suspended users.
             $users = get_enrolled_users($coursecontext, '', 0, BLOCK_ENROLMENTTIMER_USER_FIELDS);
 
+            $remaining = count($users);
             foreach ($users as $user) {
+                $remaining--;
                 if (!empty($user->deleted) || !empty($user->suspended)) {
                     continue;
                 }
@@ -135,6 +142,9 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
                     }
                 } catch (\Exception $e) {
                     mtrace("ERROR: processing user {$user->id} in course {$course->id}: " . $e->getMessage());
+                }
+                if ($remaining > 0 && $pacingusec > 0) {
+                    usleep($pacingusec);
                 }
             }
         }
@@ -330,7 +340,13 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
             return;
         }
 
+        // Pause between SMTP deliveries (see execute() for rationale).
+        $pacingraw = get_config('enrolmenttimer', 'pacing_usec');
+        $pacingusec = ($pacingraw === false) ? 1500000 : (int)$pacingraw;
+        $remaining = count($emailstosend);
+
         foreach ($emailstosend as $row) {
+            $remaining--;
             // Reconstruct alert object for update_record.
             $alert = new \stdClass();
             $alert->id = $row->alertid;
@@ -420,6 +436,9 @@ class enrolmenttimer_task extends \core\task\scheduled_task {
                 mtrace("ERROR: failed to send expiry alert to user {$user->id} for course {$course->id}");
             }
             $DB->update_record('block_enrolmenttimer', $alert);
+            if ($remaining > 0 && $pacingusec > 0) {
+                usleep($pacingusec);
+            }
         }
     }
 

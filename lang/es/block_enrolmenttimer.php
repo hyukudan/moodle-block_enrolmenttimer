@@ -14,17 +14,5 @@
 // You should have received a copy of the GNU General Public License
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
-/**
- * Version File
- *
- * @package    block_enrolmenttimer
- * @copyright  LearningWorks Ltd 2016
- * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
- */
-
-defined('MOODLE_INTERNAL') || die();
-$plugin->version   = 2026051601;
-$plugin->requires  = 2024100700; // Moodle 4.5+.
-$plugin->component = 'block_enrolmenttimer';
-$plugin->maturity  = MATURITY_STABLE;
-$plugin->release   = '5.3.2';  // Configurable pacing_usec between deliveries to avoid SMTP bursts (Microsoft S3115/S3140).
+$string['pacing_usec'] = 'Microsegundos entre envíos';
+$string['pacing_usec_desc'] = 'Pausa entre cada email durante el cron. 1500000 = 1,5 segundos (recomendado). Pon 0 para desactivar. Evita ráfagas sub-segundo que históricamente dispararon los bloqueos S3115/S3140 de Microsoft.';
