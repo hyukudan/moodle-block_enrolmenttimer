@@ -14,5 +14,11 @@
 // You should have received a copy of the GNU General Public License
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
+$string['emailsubject_expiring_default'] = 'Tu acceso al curso termina pronto';
+$string['emailsubject_completion_default'] = '¡Curso completado, enhorabuena!';
+
+$string['messageprovider:expiry_alert'] = 'Avisos de fin de acceso al curso';
+$string['messageprovider:completion_notification'] = 'Notificaciones de curso completado';
+
 $string['pacing_usec'] = 'Microsegundos entre envíos';
 $string['pacing_usec_desc'] = 'Pausa entre cada email durante el cron. 1500000 = 1,5 segundos (recomendado). Pon 0 para desactivar. Evita ráfagas sub-segundo que históricamente dispararon los bloqueos S3115/S3140 de Microsoft.';
